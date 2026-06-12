@@ -1,10 +1,12 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from kb.config import Vault
 from kb.queue import JobQueue
 from kb.sources import SourceStore
-from kb.worker import process_one
+from kb.worker import process_one, process_one_async, run_forever_async
 
 
 def make_vault(tmp_path) -> Vault:
@@ -74,3 +76,76 @@ def test_process_one_returns_false_on_empty_queue(tmp_path):
     q = JobQueue(tmp_path / "q.db")
     store = SourceStore(tmp_path / "s.db")
     assert process_one(instance=None, q=q, store=store) is False
+
+
+@pytest.mark.asyncio
+async def test_process_one_async_snippet_full_chain(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "snippet", {"text": "Asynchroner Gedanke.", "title": "Async"})
+    ingest_mock = AsyncMock()
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.cognee_io.ingest", ingest_mock):
+        worked = await process_one_async(instance=None, q=q, store=store)
+    assert worked is True
+    files = list((tmp_path / "raw").glob("*.md"))
+    assert len(files) == 1
+    assert "Asynchroner Gedanke." in files[0].read_text()
+    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[])
+    assert q.status(jid) == "done"
+
+
+@pytest.mark.asyncio
+async def test_process_one_async_marks_failed_on_fetch_error(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "web", {"url": "https://example.com/down"})
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")):
+        worked = await process_one_async(instance=None, q=q, store=store)
+    assert worked is True
+    assert q.status(jid) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_process_one_async_returns_false_on_empty_queue(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    assert await process_one_async(instance=None, q=q, store=store) is False
+
+
+@pytest.mark.asyncio
+async def test_run_forever_async_processes_jobs_and_stops_on_cancel(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "snippet", {"text": "Service-Job.", "title": "Service"})
+    ingest_mock = AsyncMock()
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.cognee_io.ingest", ingest_mock):
+        task = asyncio.create_task(
+            run_forever_async(instance=None, q=q, store=store, poll_seconds=0.01))
+        # Warten, bis der Job verarbeitet ist (Schleife idlet danach im sleep)
+        for _ in range(100):
+            if q.status(jid) == "done":
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert q.status(jid) == "done"
+    ingest_mock.assert_awaited_once()
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_run_forever_async_cancel_on_empty_queue(tmp_path):
+    # Cancel muss auch im Idle-Sleep sauber durchschlagen
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    task = asyncio.create_task(
+        run_forever_async(instance=None, q=q, store=store, poll_seconds=5.0))
+    await asyncio.sleep(0.05)  # Schleife läuft an und hängt im sleep
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled()

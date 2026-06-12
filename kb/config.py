@@ -3,6 +3,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+GATEWAY_PORT = 8800
+
 
 class UnknownVaultError(KeyError):
     pass
@@ -15,6 +17,7 @@ class Instance:
     expected_llm_provider: str   # Guard: muss zu geladener Env passen
     expected_embedding_provider: str
     var_dir: Path                # Queue-DB, Source-DB, Cognee-Roots
+    port: int                    # Instance Service (127.0.0.1, Phase 2)
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,7 @@ INSTANCES = {
         expected_llm_provider="ollama",
         expected_embedding_provider="fastembed",
         var_dir=ROOT / "var" / "privat",
+        port=8801,
     ),
     "business": Instance(
         name="business",
@@ -39,6 +43,7 @@ INSTANCES = {
         expected_llm_provider="custom",     # OpenRouter/Infomaniak via OpenAI-kompatiblem Endpoint
         expected_embedding_provider="fastembed",
         var_dir=ROOT / "var" / "business",
+        port=8802,
     ),
 }
 

@@ -26,6 +26,11 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
             continue
         key, _, value = line.partition("=")
         os.environ[key.strip()] = value.strip()
+    # cognee legt seine Root-Verzeichnisse nicht selbst an —
+    # ohne sie scheitert die relationale DB mit 'unable to open database file'.
+    for var in ("DATA_ROOT_DIRECTORY", "SYSTEM_ROOT_DIRECTORY", "CACHE_ROOT_DIRECTORY"):
+        if root := os.environ.get(var):
+            Path(root).mkdir(parents=True, exist_ok=True)
     assert_instance_env(instance)
 
 

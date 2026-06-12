@@ -1,0 +1,93 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Chat">
+  <h1>Chat</h1>
+  <label for="vault">Vault</label>
+  <select id="vault"></select>
+
+  <div id="history"></div>
+
+  <form id="chat-form">
+    <label for="question">Frage</label>
+    <textarea id="question" placeholder="Was möchtest du wissen?" required></textarea>
+    <button type="submit" id="submit" disabled>Fragen</button>
+  </form>
+  <div id="error" class="status error hidden"></div>
+
+  <script>
+    import { api, initVaultSelect } from '../lib/api.js';
+
+    const vaultSel = document.getElementById('vault');
+    const historyEl = document.getElementById('history');
+    const form = document.getElementById('chat-form');
+    const questionEl = document.getElementById('question');
+    const submit = document.getElementById('submit');
+    const errorEl = document.getElementById('error');
+
+    // Submit erst freigeben, wenn die Vault-Auswahl befüllt ist —
+    // sonst ginge ein Submit mit leerem Vault raus.
+    initVaultSelect(vaultSel).finally(() => {
+      submit.disabled = false;
+    });
+
+    const history = []; // { role, text, vault } — nur im Speicher
+
+    function render() {
+      historyEl.innerHTML = '';
+      for (const msg of history) {
+        const div = document.createElement('div');
+        div.className = `msg ${msg.role}`;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = msg.role === 'user' ? `Du · ${msg.vault}` : `KB · ${msg.vault}`;
+        const body = document.createElement('div');
+        body.className = 'body';
+        body.textContent = msg.text; // Zeilenumbrüche via CSS white-space
+        div.append(meta, body);
+        historyEl.appendChild(div);
+      }
+      historyEl.lastElementChild?.scrollIntoView({ block: 'end' });
+    }
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const question = questionEl.value.trim();
+      if (!question) return;
+      const vault = vaultSel.value;
+
+      errorEl.classList.add('hidden');
+      history.push({ role: 'user', text: question, vault });
+      render();
+      questionEl.value = '';
+      submit.disabled = true;
+      try {
+        const res = await api('/api/query', {
+          method: 'POST',
+          body: JSON.stringify({ vault, question }),
+        });
+        history.push({ role: 'assistant', text: res.answer, vault: res.vault || vault });
+        render();
+      } catch (e) {
+        errorEl.textContent = e.message;
+        errorEl.classList.remove('hidden');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+
+  <style>
+    #history { margin: 1rem 0; }
+    .msg {
+      margin: 0.6rem 0;
+      padding: 0.7rem 0.9rem;
+      border-radius: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .msg.user { border-color: var(--accent); }
+    .msg .meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.3rem; }
+    .msg .body { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  </style>
+</Base>

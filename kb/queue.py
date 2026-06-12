@@ -64,7 +64,24 @@ class JobQueue:
         self.conn.commit()
         return cur.rowcount
 
+    def info(self, job_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT id, vault, kind, status, error, created_at "
+            "FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "vault": row[1], "kind": row[2],
+                "status": row[3], "error": row[4], "created_at": row[5]}
+
     def status(self, job_id: int) -> str | None:
         row = self.conn.execute(
             "SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
         return row[0] if row else None
+
+    def counts(self) -> dict[str, int]:
+        """Job-Anzahl je Status; nicht vorkommende Stati = 0 (für /health)."""
+        result = {s: 0 for s in ("pending", "running", "done", "failed")}
+        for status, n in self.conn.execute(
+                "SELECT status, COUNT(*) FROM jobs GROUP BY status"):
+            result[status] = n
+        return result

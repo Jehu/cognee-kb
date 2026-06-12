@@ -115,5 +115,67 @@ def worker(instance: str):
     worker_mod.run_forever(inst, q, store)
 
 
+def _load_env_file(path: Path) -> None:
+    """Einfacher Env-Parser (wie cognee_io.load_instance_env, aber ohne Guard).
+
+    load_instance_env hat zwar einen env_path-Parameter, prüft aber per
+    assert_instance_env die LLM-Provider einer Instanz — für die Gateway-Env
+    (nur KB_API_TOKEN) ungeeignet, daher dieser kleine lokale Helper.
+
+    Bereits gesetzte Shell-Env gewinnt (dotenv-Konvention): setdefault
+    überschreibt vorhandene Variablen nicht.
+    """
+    import os
+
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+@app.command("serve-instance")
+def serve_instance(instance: str):
+    """Startet den Instance Service (privat | business) auf 127.0.0.1."""
+    # Lazy-Imports: instance_service zieht cognee — nur in diesem Befehl laden.
+    import uvicorn
+
+    from kb import instance_service
+
+    inst = get_instance(instance)
+    uvicorn.run(instance_service.create_app(instance), host="127.0.0.1", port=inst.port)
+
+
+@app.command("serve-gateway")
+def serve_gateway():
+    """Startet das Gateway (Auth, Enqueue, Query-Proxy, PWA) auf Port 8800."""
+    import os
+
+    import uvicorn
+
+    from kb import gateway  # lazy — Gateway bleibt cognee-frei
+    from kb.config import GATEWAY_PORT
+
+    env_file = ROOT / ".env.gateway"
+    if env_file.is_file():
+        _load_env_file(env_file)
+    token = os.environ.get("KB_API_TOKEN", "")
+    if not token:
+        typer.echo(
+            "WARNUNG: KB_API_TOKEN nicht gesetzt — alle /api-Requests werden "
+            "mit 401 abgelehnt (.env.gateway aus .env.gateway.template anlegen).",
+            err=True,
+        )
+    elif token == "CHANGE_ME":
+        # Kein Abbruch — lokales Testen bleibt möglich, aber laut warnen.
+        typer.echo(
+            "WARNUNG: KB_API_TOKEN steht noch auf dem Platzhalter 'CHANGE_ME' "
+            "— vor produktivem Betrieb ein echtes Token setzen!",
+            err=True,
+        )
+    uvicorn.run(gateway.create_app(), host="0.0.0.0", port=GATEWAY_PORT)
+
+
 if __name__ == "__main__":
     app()

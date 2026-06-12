@@ -35,3 +35,11 @@ def test_ingest_rejects_unknown_vault(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.cli.queue_path", lambda inst: tmp_path / f"{inst}.db")
     result = runner.invoke(app, ["ingest", "geheim", "text"])
     assert result.exit_code != 0
+
+
+def test_serve_befehle_registriert():
+    # Nur Registrierung prüfen — uvicorn.run darf hier nicht laufen.
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "serve-instance" in result.output
+    assert "serve-gateway" in result.output

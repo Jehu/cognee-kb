@@ -1,0 +1,19 @@
+{
+  "name": "KB",
+  "short_name": "KB",
+  "description": "Multi-Vault Knowledge System",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

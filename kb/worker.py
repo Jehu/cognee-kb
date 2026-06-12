@@ -24,35 +24,43 @@ def _fetch(kind: str, payload: dict) -> FetchedDoc:
     raise ValueError(f"Unbekannter Job-Typ: {kind}")
 
 
-def process_one(instance: Instance | None, q: JobQueue, store: SourceStore,
-                loop: asyncio.AbstractEventLoop | None = None) -> bool:
+async def process_one_async(instance: Instance | None, q: JobQueue,
+                            store: SourceStore) -> bool:
     """Verarbeitet genau einen Job. True = es gab Arbeit, False = Queue leer."""
     job = q.claim_next()
     if job is None:
         return False
     try:
         vault = get_vault(job.vault)
-        doc = _fetch(job.kind, job.payload)
+        # _fetch ist blockierendes I/O (HTTP, Datei) — nicht den Loop blockieren
+        doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
         record = SourceRecord.new(
             type=job.kind, url=doc.url, video_id=doc.video_id,
             locator=doc.locator, vault=vault.name, raw_md_path="")
         path, record = rawstore.write_raw(vault.raw_dir, doc.title, doc.body, record)
         store.insert(record)
         node_set = job.payload.get("node_set")
-        coro = cognee_io.ingest(
+        await cognee_io.ingest(
             instance, path, vault.dataset,
             node_sets=node_set if isinstance(node_set, list)
             else ([node_set] if node_set else []))
-        if loop is not None:
-            loop.run_until_complete(coro)
-        else:
-            asyncio.run(coro)
         q.mark_done(job.id)
     except Exception as e:  # noqa: BLE001 — Worker darf nie sterben
+        # Fängt nur Job-Fehler: asyncio.CancelledError ist BaseException und
+        # läuft hier durch — die Loop-Cancellation bleibt damit intakt.
         print(f"[worker] job {job.id} failed: {type(e).__name__}: {e}",
               file=sys.stderr)
         q.mark_failed(job.id, f"{type(e).__name__}: {e}")
     return True
+
+
+def process_one(instance: Instance | None, q: JobQueue, store: SourceStore,
+                loop: asyncio.AbstractEventLoop | None = None) -> bool:
+    """Dünner sync-Wrapper um process_one_async — Signatur bleibt CLI-kompatibel."""
+    coro = process_one_async(instance, q, store)
+    if loop is not None:
+        return loop.run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def run_forever(instance: Instance, q: JobQueue, store: SourceStore,
@@ -69,3 +77,18 @@ def run_forever(instance: Instance, q: JobQueue, store: SourceStore,
                 time.sleep(poll_seconds)
     finally:
         loop.close()
+
+
+async def run_forever_async(instance: Instance, q: JobQueue, store: SourceStore,
+                            poll_seconds: float = 5.0) -> None:
+    """Worker-Schleife für den Instance Service (Phase 2).
+
+    KEIN Env-Load und KEIN recover_stale — beides macht der Service beim Start.
+    Läuft auf dem Loop des Aufrufers (damit cognee seine loop-gebundenen
+    Ressourcen über alle Jobs hinweg wiederverwenden kann) und ist sauber per
+    asyncio.CancelledError abbrechbar: process_one_async schluckt die
+    Cancellation nicht, await asyncio.sleep reicht sie ebenfalls durch.
+    """
+    while True:
+        if not await process_one_async(instance, q, store):
+            await asyncio.sleep(poll_seconds)
