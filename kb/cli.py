@@ -84,17 +84,23 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
     except UnknownVaultError:
         typer.echo(f"Unbekannter Vault: {vault}", err=True)
         raise typer.Exit(1)
-    c = classify(content)
     payload: dict = {"node_set": node_set} if node_set else {}
-    if c.kind == "youtube":
-        payload |= {"url": content.strip(), "video_id": c.video_id}
-    elif c.kind == "web":
-        payload |= {"url": content.strip()}
+    p = Path(content).expanduser()
+    if p.is_file():
+        kind = "file"
+        payload |= {"path": str(p.resolve())}
     else:
-        payload |= {"text": content, "title": content[:50]}
+        c = classify(content)
+        kind = c.kind
+        if kind == "youtube":
+            payload |= {"url": content.strip(), "video_id": c.video_id}
+        elif kind == "web":
+            payload |= {"url": content.strip()}
+        else:
+            payload |= {"text": content, "title": content[:50]}
     q = JobQueue(queue_path(v.instance))
-    jid = q.enqueue(v.name, c.kind, payload)
-    typer.echo(f"queued: job {jid} ({c.kind}) -> {v.name}")
+    jid = q.enqueue(v.name, kind, payload)
+    typer.echo(f"queued: job {jid} ({kind}) -> {v.name}")
 
 
 @app.command()

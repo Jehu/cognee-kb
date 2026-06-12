@@ -24,7 +24,8 @@ def _fetch(kind: str, payload: dict) -> FetchedDoc:
     raise ValueError(f"Unbekannter Job-Typ: {kind}")
 
 
-def process_one(instance: Instance | None, q: JobQueue, store: SourceStore) -> bool:
+def process_one(instance: Instance | None, q: JobQueue, store: SourceStore,
+                loop: asyncio.AbstractEventLoop | None = None) -> bool:
     """Verarbeitet genau einen Job. True = es gab Arbeit, False = Queue leer."""
     job = q.claim_next()
     if job is None:
@@ -38,10 +39,14 @@ def process_one(instance: Instance | None, q: JobQueue, store: SourceStore) -> b
         path, record = rawstore.write_raw(vault.raw_dir, doc.title, doc.body, record)
         store.insert(record)
         node_set = job.payload.get("node_set")
-        asyncio.run(cognee_io.ingest(
+        coro = cognee_io.ingest(
             instance, path, vault.dataset,
             node_sets=node_set if isinstance(node_set, list)
-            else ([node_set] if node_set else [])))
+            else ([node_set] if node_set else []))
+        if loop is not None:
+            loop.run_until_complete(coro)
+        else:
+            asyncio.run(coro)
         q.mark_done(job.id)
     except Exception as e:  # noqa: BLE001 — Worker darf nie sterben
         print(f"[worker] job {job.id} failed: {type(e).__name__}: {e}",
@@ -54,6 +59,13 @@ def run_forever(instance: Instance, q: JobQueue, store: SourceStore,
                 poll_seconds: float = 5.0) -> None:
     cognee_io.load_instance_env(instance)
     q.recover_stale()  # genau ein Worker pro Instanz — verwaiste Jobs gefahrlos zurücksetzen
-    while True:
-        if not process_one(instance, q, store):
-            time.sleep(poll_seconds)
+    # EIN Loop für alle Jobs — cognee cachet loop-gebundene Ressourcen
+    # (siehe _answer_all in cli.py), frischer Loop pro Job riskiert
+    # 'attached to a different loop'-Fehler.
+    loop = asyncio.new_event_loop()
+    try:
+        while True:
+            if not process_one(instance, q, store, loop=loop):
+                time.sleep(poll_seconds)
+    finally:
+        loop.close()

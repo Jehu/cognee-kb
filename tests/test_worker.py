@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from kb.config import Vault
@@ -47,6 +48,26 @@ def test_process_one_marks_failed_on_fetch_error(tmp_path):
         worked = process_one(instance=None, q=q, store=store)
     assert worked is True
     assert q.status(jid) == "failed"
+
+
+def test_process_one_reuses_given_loop(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    j1 = q.enqueue("privat", "snippet", {"text": "Erster.", "title": "Eins"})
+    j2 = q.enqueue("privat", "snippet", {"text": "Zweiter.", "title": "Zwei"})
+    ingest_mock = AsyncMock()
+    loop = asyncio.new_event_loop()
+    try:
+        with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+             patch("kb.cognee_io.ingest", ingest_mock):
+            assert process_one(instance=None, q=q, store=store, loop=loop) is True
+            assert process_one(instance=None, q=q, store=store, loop=loop) is True
+    finally:
+        loop.close()
+    # Beide Jobs liefen ohne Fehler auf EINEM Loop
+    assert q.status(j1) == "done"
+    assert q.status(j2) == "done"
+    assert ingest_mock.await_count == 2
 
 
 def test_process_one_returns_false_on_empty_queue(tmp_path):

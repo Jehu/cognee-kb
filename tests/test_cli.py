@@ -14,6 +14,23 @@ def test_ingest_enqueues_youtube(tmp_path, monkeypatch):
     assert "youtube" in result.output
 
 
+def test_ingest_enqueues_local_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.cli.queue_path", lambda inst: tmp_path / f"{inst}.db")
+    f = tmp_path / "notiz.md"
+    f.write_text("# Lokale Notiz\n\nInhalt.")
+    result = runner.invoke(app, ["ingest", "privat", str(f)])
+    assert result.exit_code == 0
+    assert "queued" in result.output
+    assert "(file)" in result.output
+
+
+def test_ingest_plain_text_stays_snippet(tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.cli.queue_path", lambda inst: tmp_path / f"{inst}.db")
+    result = runner.invoke(app, ["ingest", "privat", "Nur ein Gedanke."])
+    assert result.exit_code == 0
+    assert "(snippet)" in result.output
+
+
 def test_ingest_rejects_unknown_vault(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.cli.queue_path", lambda inst: tmp_path / f"{inst}.db")
     result = runner.invoke(app, ["ingest", "geheim", "text"])
