@@ -5,8 +5,9 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
 - cognee.cognify(datasets=[...]) — wie im Plan.
 - cognee.search(query_text=..., query_type=SearchType.GRAPH_COMPLETION,
   datasets=[...]) — wie im Plan; Rückgabe ist aber list[SearchResult]
-  (Pydantic-Modell mit Feld `search_result`), nicht list[str]. `query()`
-  extrahiert deshalb `search_result` statt das Modell roh zu str()-en.
+  (Pydantic-Modell mit Feld `search_result`), nicht list[str]. Mit
+  ENABLE_BACKEND_ACCESS_CONTROL=true kommen stattdessen dicts mit dem
+  Key 'search_result' (empirisch, Phase-0-Lauf). `_render` behandelt beides.
 """
 
 import os
@@ -50,8 +51,11 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
 
 
 def _render(result) -> str:
-    """SearchResult.search_result extrahieren; Listen flach joinen."""
-    payload = getattr(result, "search_result", result)
+    """SearchResult.search_result extrahieren (Objekt ODER dict); Listen flach joinen."""
+    if isinstance(result, dict):
+        payload = result.get("search_result", result)
+    else:
+        payload = getattr(result, "search_result", result)
     if isinstance(payload, list):
         return "\n".join(str(item) for item in payload)
     return str(payload)

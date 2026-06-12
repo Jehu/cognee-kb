@@ -32,3 +32,12 @@ def test_render_passes_string_payload_through():
 
 def test_render_falls_back_to_str_without_attribute():
     assert _render(42) == "42"
+
+
+def test_render_unwraps_dict_payload():
+    # Mit ENABLE_BACKEND_ACCESS_CONTROL liefert search() dicts statt Objekten.
+    assert _render({"search_result": ["Antwort A", "Antwort B"]}) == "Antwort A\nAntwort B"
+
+
+def test_render_dict_without_key_falls_back():
+    assert _render({"foo": "bar"}) == "{'foo': 'bar'}"
