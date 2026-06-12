@@ -103,7 +103,7 @@ Die `SKILL.md`-Datei ist in drei Teile gegliedert, die für die Funktion des Ski
 
 Gespeichert: /Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-06-12-das-agentskillspattern-ein-skill-strukturell-aufgebaut.md
 
-**Gewinner Frage 1: ___**
+**Gewinner Frage 1: A (Cognee)**
 
 ---
 
@@ -216,7 +216,7 @@ Kombiniert Datenbank (Quelle der Wahrheit) mit kompilierter, regenerierbarer Ans
 ---
 **Kernprinzip:** "Retrieval > Listing" — die richtige Frage ist nicht "Was weiß ich?", sondern "Was brauche ich jetzt?".
 
-**Gewinner Frage 2: ___**
+**Gewinner Frage 2: B (Cognee)**
 
 ---
 
@@ -269,7 +269,7 @@ Um die Verwaltung der parallelen Sitzungen zu vereinfachen, empfiehlt er die Üb
 
 Gespeichert: /Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-06-12-empfiehlt-boris-cherny-fuer-den-claudecodeworkflow.md
 
-**Gewinner Frage 3: ___**
+**Gewinner Frage 3: B (GraphRAG)**
 
 ---
 
@@ -396,7 +396,7 @@ Diese Grenzen verhindern, dass der Agent in einen unkontrollierbaren Zustand ger
 
 Gespeichert: /Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-06-12-haengen-agentautonomie-enforcement-ueber-hooks-zusammen-braucht-es.md
 
-**Gewinner Frage 4: ___**
+**Gewinner Frage 4: A (Cognee)**
 
 ---
 
@@ -482,7 +482,7 @@ Im Zusammenspiel fuer Agent Self-Improvement uebernehmen die drei Komponenten fo
 
 **Zusammengefasst:** Memory erkennt und speichert Lernmuster, Skills kodifizieren diese Muster als wiederverwendbare Prozesse, Hooks erzwingen deren Einhaltung deterministisch. Ohne Memory kein Lernen, ohne Skills kein strukturiertes Wiederverwenden, ohne Hooks kein verlaessliches Durchsetzen.
 
-**Gewinner Frage 5: ___**
+**Gewinner Frage 5: B (Cognee)**
 
 ---
 
@@ -600,7 +600,7 @@ Die menschliche Rolle verschiebt sich: von **in the loop** zu **above the loop**
 
 **Kernthese:** Encoded Judgment ist der Moat - wer Domain-Wissen in maschinenlesbare Constraint-Specs codiert, hat strukturellen Vorteil.
 
-**Gewinner Frage 6: ___**
+**Gewinner Frage 6: B (Cognee)**
 
 ---
 
@@ -741,7 +741,7 @@ Der Audit folgt einem strukturierten Framework, um das Automatisierungspotenzial
 
 Gespeichert: /Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-06-12-eine-kleine-agentur-ihr-projektmanagement-mit-aiagenten-n8n.md
 
-**Gewinner Frage 7: ___**
+**Gewinner Frage 7: B (GraphRAG)**
 
 ---
 
@@ -874,4 +874,4 @@ Diese Grenzen betreffen die theoretischen Fähigkeiten der KI-Modelle selbst.
 
 Gespeichert: /Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-06-12-wiederkehrenden-risiken-grenzen-von-agentenautomatisierung-nennen-die-quellen.md
 
-**Gewinner Frage 8: ___**
+**Gewinner Frage 8: A (Cognee)**
