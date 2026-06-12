@@ -8,8 +8,9 @@ import yaml
 
 
 class _QuotingDumper(yaml.SafeDumper):
-    """YAML dumper that quotes strings containing colons."""
-    pass
+    """Quotet Strings mit Doppelpunkten explizit — PyYAMLs Sexagesimal-Resolver
+    verlangt eine führende [1-9], daher bliebe z. B. '00:12:30' unquoted und
+    der Frontmatter-Roundtrip wäre mehrdeutig. Nicht zu safe_dump vereinfachen!"""
 
 
 def _str_representer(dumper, data):

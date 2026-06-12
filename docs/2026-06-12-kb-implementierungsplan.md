@@ -684,7 +684,7 @@ class SourceStore:
         return SourceRecord(*row)
 ```
 
-*Hinweis zu `locator: '00:12:30'` im Test: yaml.safe_dump quotet Strings mit Doppelpunkten automatisch.*
+*Hinweis zu `locator: '00:12:30'` im Test: yaml.safe_dump quotet das NICHT automatisch — PyYAMLs Sexagesimal-Resolver verlangt eine führende `[1-9]`, `00:12:30` bleibt also unquoted. Deshalb braucht `frontmatter()` einen eigenen SafeDumper-Subclass, der Strings mit Doppelpunkten explizit quotet (in der Implementierung als `_QuotingDumper` umgesetzt).*
 
 - [ ] **Step 4: Test laufen lassen**
 
