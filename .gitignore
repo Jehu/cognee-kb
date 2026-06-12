@@ -4,3 +4,4 @@ __pycache__/
 .env.business
 var/
 .pytest_cache/
+.DS_Store

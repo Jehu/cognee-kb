@@ -30,14 +30,14 @@ INSTANCES = {
         name="privat",
         env_file=ROOT / ".env.privat",
         expected_llm_provider="ollama",
-        expected_embedding_provider="ollama",
+        expected_embedding_provider="fastembed",
         var_dir=ROOT / "var" / "privat",
     ),
     "business": Instance(
         name="business",
         env_file=ROOT / ".env.business",
         expected_llm_provider="custom",     # OpenRouter/Infomaniak via OpenAI-kompatiblem Endpoint
-        expected_embedding_provider="ollama",
+        expected_embedding_provider="fastembed",
         var_dir=ROOT / "var" / "business",
     ),
 }

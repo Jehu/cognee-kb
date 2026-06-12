@@ -1342,6 +1342,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cognee" },
+    { name = "fastembed" },
     { name = "pyyaml" },
     { name = "trafilatura" },
     { name = "typer" },
@@ -1357,6 +1358,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cognee", specifier = "==0.3.*" },
+    { name = "fastembed", specifier = ">=0.6.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "trafilatura", specifier = ">=2.1.0" },
     { name = "typer", specifier = ">=0.26.7" },
