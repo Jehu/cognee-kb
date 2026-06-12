@@ -57,6 +57,13 @@ class JobQueue:
             "UPDATE jobs SET status='failed', error=? WHERE id=?", (error, job_id))
         self.conn.commit()
 
+    def recover_stale(self) -> int:
+        """Setzt verwaiste 'running'-Jobs (z. B. nach Worker-Crash) auf 'pending' zurück."""
+        cur = self.conn.execute(
+            "UPDATE jobs SET status='pending', error=NULL WHERE status='running'")
+        self.conn.commit()
+        return cur.rowcount
+
     def status(self, job_id: int) -> str | None:
         row = self.conn.execute(
             "SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()

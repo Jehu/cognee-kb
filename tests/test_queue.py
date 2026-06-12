@@ -23,3 +23,15 @@ def test_done_and_failed(tmp_path):
     assert q.status(a) == "done"
     assert q.status(b) == "failed"
     assert q.claim_next() is None
+
+
+def test_recover_stale_requeues_running_jobs(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    job_id = q.enqueue("privat", "snippet", {"text": "x"})
+    claimed = q.claim_next()
+    assert claimed.id == job_id
+    assert q.status(job_id) == "running"
+    assert q.recover_stale() == 1
+    again = q.claim_next()
+    assert again is not None
+    assert again.id == job_id

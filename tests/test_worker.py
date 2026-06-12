@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from kb.config import Vault
@@ -15,7 +14,7 @@ def make_vault(tmp_path) -> Vault:
 def test_process_one_snippet_full_chain(tmp_path):
     q = JobQueue(tmp_path / "q.db")
     store = SourceStore(tmp_path / "s.db")
-    q.enqueue("privat", "snippet", {"text": "Wichtiger Gedanke.", "title": "Notiz"})
+    jid = q.enqueue("privat", "snippet", {"text": "Wichtiger Gedanke.", "title": "Notiz"})
     ingest_mock = AsyncMock()
     with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
          patch("kb.cognee_io.ingest", ingest_mock):
@@ -26,8 +25,16 @@ def test_process_one_snippet_full_chain(tmp_path):
     assert len(files) == 1
     assert "Wichtiger Gedanke." in files[0].read_text()
     # Source-Record zeigt auf die Datei
-    ingest_mock.assert_awaited_once()
+    row = store.conn.execute(
+        "SELECT raw_md_path, vault, type FROM sources").fetchone()
+    assert row is not None
+    assert row[0] == str(files[0])
+    assert row[1] == "privat"
+    assert row[2] == "snippet"
+    # Ingest mit korrekten Argumenten aufgerufen
+    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[])
     # Job ist done
+    assert q.status(jid) == "done"
     assert q.claim_next() is None
 
 
