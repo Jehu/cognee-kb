@@ -1,0 +1,83 @@
+import sqlite3
+import uuid
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+
+class _QuotingDumper(yaml.SafeDumper):
+    """YAML dumper that quotes strings containing colons."""
+    pass
+
+
+def _str_representer(dumper, data):
+    if ':' in data:
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style="'")
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+
+_QuotingDumper.add_representer(str, _str_representer)
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sources (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    url TEXT,
+    video_id TEXT,
+    locator TEXT,
+    fetched_at TEXT NOT NULL,
+    vault TEXT NOT NULL,
+    raw_md_path TEXT NOT NULL
+);
+"""
+
+
+@dataclass(frozen=True)
+class SourceRecord:
+    id: str
+    type: str          # youtube | web | snippet | file
+    url: str | None
+    video_id: str | None
+    locator: str | None
+    fetched_at: str    # ISO-8601 UTC
+    vault: str
+    raw_md_path: str
+
+    @classmethod
+    def new(cls, **kwargs) -> "SourceRecord":
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return cls(id=str(uuid.uuid4()), fetched_at=now, **kwargs)
+
+    def frontmatter(self) -> str:
+        data = asdict(self)
+        data["source_id"] = data.pop("id")
+        body = yaml.dump(data, Dumper=_QuotingDumper, sort_keys=False, allow_unicode=True,
+                         default_flow_style=False)
+        return f"---\n{body}---\n"
+
+
+class SourceStore:
+    def __init__(self, db_path: Path):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.executescript(SCHEMA)
+
+    def insert(self, r: SourceRecord) -> None:
+        self.conn.execute(
+            "INSERT INTO sources VALUES (?,?,?,?,?,?,?,?)",
+            (r.id, r.type, r.url, r.video_id, r.locator, r.fetched_at,
+             r.vault, r.raw_md_path),
+        )
+        self.conn.commit()
+
+    def get(self, source_id: str) -> SourceRecord | None:
+        row = self.conn.execute(
+            "SELECT id,type,url,video_id,locator,fetched_at,vault,raw_md_path "
+            "FROM sources WHERE id=?", (source_id,)).fetchone()
+        if row is None:
+            return None
+        return SourceRecord(*row)
