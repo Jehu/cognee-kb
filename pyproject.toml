@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "cognee==0.3.*",
-    "fastembed>=0.6.0",
+    # Hart gepinnt: fastembed 0.6 wechselte das Pooling (CLS -> mean) für mpnet.
+    # Ein Versionswechsel ändert die Vektoren -> bestehender Index wäre wertlos.
+    "fastembed==0.6.0",
     "pyyaml>=6.0.3",
     "trafilatura>=2.1.0",
     "typer>=0.26.7",
