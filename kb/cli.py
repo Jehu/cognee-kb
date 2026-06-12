@@ -4,7 +4,7 @@ from pathlib import Path
 import typer
 
 from kb import cognee_io
-from kb.config import get_instance, get_vault
+from kb.config import ROOT, Instance, get_instance, get_vault
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -28,21 +28,33 @@ def query(vault: str, question: str):
     typer.echo(answer)
 
 
-@app.command()
-def eval(vault: str = "privat", out: Path = Path("eval/antworten-cognee.md")):
+async def _answer_all(inst: Instance, fragen: list[str], datasets: list[str]) -> list[str]:
+    """Alle Fragen sequenziell im SELBEN Event-Loop beantworten.
+
+    cognee cachet loop-gebundene Ressourcen — ein frischer Loop pro Frage
+    riskiert 'attached to a different loop'-Fehler.
+    """
+    blocks = []
+    for i, frage in enumerate(fragen, 1):
+        antwort = await cognee_io.query(inst, frage, datasets=datasets)
+        blocks.append(f"## Frage {i}: {frage}\n\n{antwort}\n")
+    return blocks
+
+
+@app.command("eval")
+def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cognee.md"):
     """Beantwortet alle Fragen aus eval/fragen.md für den Blind-Vergleich."""
     v = get_vault(vault)
     inst = get_instance(v.instance)
     cognee_io.load_instance_env(inst)
     fragen = [
         line.removeprefix("- ").strip()
-        for line in Path("eval/fragen.md").read_text().splitlines()
+        for line in (ROOT / "eval" / "fragen.md").read_text().splitlines()
         if line.startswith("- ")
     ]
-    blocks = []
-    for i, frage in enumerate(fragen, 1):
-        antwort = asyncio.run(cognee_io.query(inst, frage, datasets=[v.dataset]))
-        blocks.append(f"## Frage {i}: {frage}\n\n{antwort}\n")
+    if not fragen or fragen[0].startswith("<"):
+        raise typer.BadParameter("eval/fragen.md ist noch nicht ausgefüllt")
+    blocks = asyncio.run(_answer_all(inst, fragen, datasets=[v.dataset]))
     out.write_text("\n".join(blocks))
     typer.echo(f"{len(fragen)} Antworten -> {out}")
 

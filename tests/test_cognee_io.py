@@ -1,4 +1,4 @@
-from kb.cognee_io import load_instance_env
+from kb.cognee_io import _render, load_instance_env
 from kb.config import get_instance
 
 
@@ -7,6 +7,28 @@ def test_load_instance_env_sets_vars(tmp_path, monkeypatch):
     env_file.write_text('LLM_PROVIDER=ollama\n# Kommentar\nEMBEDDING_PROVIDER=ollama\n')
     inst = get_instance("privat")
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
     load_instance_env(inst, env_path=env_file)
     import os
     assert os.environ["LLM_PROVIDER"] == "ollama"
+    assert os.environ["EMBEDDING_PROVIDER"] == "ollama"
+
+
+class _StubSearchResult:
+    """Nachbau von cognee SearchResult — nur das Feld, das _render nutzt."""
+
+    def __init__(self, search_result):
+        self.search_result = search_result
+
+
+def test_render_joins_list_payload():
+    result = _StubSearchResult(["Antwort A", "Antwort B"])
+    assert _render(result) == "Antwort A\nAntwort B"
+
+
+def test_render_passes_string_payload_through():
+    assert _render(_StubSearchResult("nur Text")) == "nur Text"
+
+
+def test_render_falls_back_to_str_without_attribute():
+    assert _render(42) == "42"
