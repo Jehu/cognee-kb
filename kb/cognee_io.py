@@ -26,11 +26,19 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
             continue
         key, _, value = line.partition("=")
         os.environ[key.strip()] = value.strip()
-    # cognee legt seine Root-Verzeichnisse nicht selbst an —
-    # ohne sie scheitert die relationale DB mit 'unable to open database file'.
-    for var in ("DATA_ROOT_DIRECTORY", "SYSTEM_ROOT_DIRECTORY", "CACHE_ROOT_DIRECTORY"):
-        if root := os.environ.get(var):
-            Path(root).mkdir(parents=True, exist_ok=True)
+    # Cognee-Verzeichnisse per Konvention aus var_dir ableiten (Single Source:
+    # config.py) statt absoluter Pfade in den Env-Files — portabel für die VPS.
+    # Cognees eigene Defaults zeigen ins installierte Package (.venv!), und es
+    # legt die Verzeichnisse nicht selbst an ('unable to open database file').
+    cognee_dirs = {
+        "DATA_ROOT_DIRECTORY": instance.var_dir / "cognee_data",
+        "SYSTEM_ROOT_DIRECTORY": instance.var_dir / "cognee_system",
+        "CACHE_ROOT_DIRECTORY": instance.var_dir / "cognee_cache",
+        "COGNEE_LOGS_DIR": instance.var_dir / "logs",
+    }
+    for var, directory in cognee_dirs.items():
+        os.environ[var] = str(directory)
+        directory.mkdir(parents=True, exist_ok=True)
     assert_instance_env(instance)
 
 
