@@ -1,2 +1,12 @@
-# 10 echte Quellen (YouTube-URLs, Weblinks), eine pro Zeile — von Marco zu befüllen.
-# <https://…>
+# Phase-0-Quellen: Themen-Cluster "AI-Agenten" aus dem Business-Wiki (kDrive)
+# Ingest-Befehl: grep -v '^#' eval/quellen.txt | while read -r f; do uv run kb add business-ki "$f"; done
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-skills-pattern.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-memory-persistence.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-autonomy.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-self-improvement.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-hooks-enforcement.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/concepts/agent-native-infrastructure.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/video-analysis/claude-code-creator-workflow-setup-boris-cherny.md
+/Users/marco/kDrive/4 Archiv/knowledge/wiki/video-analysis/2026-05-04-claude-code-design-just-became-unstoppable.md
+/Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-05-04-projektmanagement-mit-ai-agents.md
+/Users/marco/kDrive/4 Archiv/knowledge/synthesis/2026-05-12-ki-automatisierung-projektmanagement-kleine-agenturen-workflows-n8n.md
