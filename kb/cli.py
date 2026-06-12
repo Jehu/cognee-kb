@@ -4,26 +4,44 @@ from pathlib import Path
 import typer
 
 from kb import cognee_io
-from kb.config import ROOT, Instance, get_instance, get_vault
+from kb.classify import classify
+from kb.config import (
+    ROOT,
+    Instance,
+    UnknownVaultError,
+    Vault,
+    get_instance,
+    get_vault,
+)
+from kb.queue import JobQueue
+from kb.sources import SourceStore
 
 app = typer.Typer(no_args_is_help=True)
+
+
+def _load(vault: str) -> tuple[Vault, Instance]:
+    """Vault + Instanz auflösen und die Cognee-Env der Instanz laden."""
+    v = get_vault(vault)
+    inst = get_instance(v.instance)
+    cognee_io.load_instance_env(inst)
+    return v, inst
+
+
+def queue_path(instance_name: str) -> Path:
+    return get_instance(instance_name).var_dir / "queue.db"
 
 
 @app.command()
 def add(vault: str, path: Path):
     """Phase 0: eine Datei direkt ingestieren (ohne Queue)."""
-    v = get_vault(vault)
-    inst = get_instance(v.instance)
-    cognee_io.load_instance_env(inst)
+    v, inst = _load(vault)
     asyncio.run(cognee_io.ingest(inst, path, v.dataset, node_sets=[]))
     typer.echo(f"ingested: {path} -> {v.dataset}")
 
 
 @app.command()
 def query(vault: str, question: str):
-    v = get_vault(vault)
-    inst = get_instance(v.instance)
-    cognee_io.load_instance_env(inst)
+    v, inst = _load(vault)
     answer = asyncio.run(cognee_io.query(inst, question, datasets=[v.dataset]))
     typer.echo(answer)
 
@@ -44,9 +62,7 @@ async def _answer_all(inst: Instance, fragen: list[str], datasets: list[str]) ->
 @app.command("eval")
 def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cognee.md"):
     """Beantwortet alle Fragen aus eval/fragen.md für den Blind-Vergleich."""
-    v = get_vault(vault)
-    inst = get_instance(v.instance)
-    cognee_io.load_instance_env(inst)
+    v, inst = _load(vault)
     fragen = [
         line.removeprefix("- ").strip()
         for line in (ROOT / "eval" / "fragen.md").read_text().splitlines()
@@ -57,6 +73,39 @@ def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cogne
     blocks = asyncio.run(_answer_all(inst, fragen, datasets=[v.dataset]))
     out.write_text("\n".join(blocks))
     typer.echo(f"{len(fragen)} Antworten -> {out}")
+
+
+@app.command()
+def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
+    """Wirft Input in die Queue des zuständigen Workers."""
+    try:
+        v = get_vault(vault)
+    except UnknownVaultError:
+        typer.echo(f"Unbekannter Vault: {vault}", err=True)
+        raise typer.Exit(1)
+    c = classify(content)
+    payload: dict = {"node_set": node_set} if node_set else {}
+    if c.kind == "youtube":
+        payload |= {"url": content.strip(), "video_id": c.video_id}
+    elif c.kind == "web":
+        payload |= {"url": content.strip()}
+    else:
+        payload |= {"text": content, "title": content[:50]}
+    q = JobQueue(queue_path(v.instance))
+    jid = q.enqueue(v.name, c.kind, payload)
+    typer.echo(f"queued: job {jid} ({c.kind}) -> {v.name}")
+
+
+@app.command()
+def worker(instance: str):
+    """Startet den seriellen Worker einer Instanz (privat | business)."""
+    from kb import worker as worker_mod
+
+    inst = get_instance(instance)
+    q = JobQueue(inst.var_dir / "queue.db")
+    store = SourceStore(inst.var_dir / "sources.db")
+    typer.echo(f"Worker '{instance}' läuft (seriell, Strg-C zum Beenden)")
+    worker_mod.run_forever(inst, q, store)
 
 
 if __name__ == "__main__":
