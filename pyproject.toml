@@ -12,8 +12,24 @@ dependencies = [
     "youtube-transcript-api>=1.2.4",
 ]
 
+[project.scripts]
+kb = "kb.cli:app"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
 ]
+
+[tool.uv]
+# cognee 0.3.9 erlaubt mistralai>=1.9.10 ohne Obergrenze, aber sein
+# instructor-Pin (1.15.x) braucht mistralai<2 — sonst bricht `import cognee`.
+constraint-dependencies = ["mistralai<2.0.0"]
+
+[build-system]
+requires = ["uv_build>=0.7.19,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "kb"
+module-root = ""
