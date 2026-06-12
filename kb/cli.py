@@ -41,6 +41,7 @@ def add(vault: str, path: Path):
 
 @app.command()
 def query(vault: str, question: str):
+    """Stellt eine Frage an einen Vault (GRAPH_COMPLETION)."""
     v, inst = _load(vault)
     answer = asyncio.run(cognee_io.query(inst, question, datasets=[v.dataset]))
     typer.echo(answer)
@@ -102,7 +103,7 @@ def worker(instance: str):
     from kb import worker as worker_mod
 
     inst = get_instance(instance)
-    q = JobQueue(inst.var_dir / "queue.db")
+    q = JobQueue(queue_path(instance))
     store = SourceStore(inst.var_dir / "sources.db")
     typer.echo(f"Worker '{instance}' läuft (seriell, Strg-C zum Beenden)")
     worker_mod.run_forever(inst, q, store)
