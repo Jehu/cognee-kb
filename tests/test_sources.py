@@ -1,3 +1,5 @@
+import sqlite3
+
 from kb.sources import SourceRecord, SourceStore
 
 
@@ -22,6 +24,41 @@ def test_roundtrip(tmp_path):
     store.insert(r)
     got = store.get(r.id)
     assert got == r
+
+
+def test_roundtrip_with_title(tmp_path):
+    store = SourceStore(tmp_path / "sources.db")
+    r = make_record(title="Mein Titel")
+    store.insert(r)
+    got = store.get(r.id)
+    assert got == r
+    assert got.title == "Mein Titel"
+
+
+def test_migration_adds_title_column(tmp_path):
+    """Alte DB ohne title-Spalte wird durch SourceStore.__init__ migriert."""
+    db_path = tmp_path / "old.db"
+    # Altes Schema ohne title anlegen
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS sources (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            url TEXT,
+            video_id TEXT,
+            locator TEXT,
+            fetched_at TEXT NOT NULL,
+            vault TEXT NOT NULL,
+            raw_md_path TEXT NOT NULL
+        );
+    """)
+    conn.close()
+    # SourceStore öffnet und migriert
+    store = SourceStore(db_path)
+    r = make_record(title="Nach Migration")
+    store.insert(r)
+    got = store.get(r.id)
+    assert got.title == "Nach Migration"
 
 
 def test_frontmatter_renders_all_fields():

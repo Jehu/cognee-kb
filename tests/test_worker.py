@@ -34,8 +34,9 @@ def test_process_one_snippet_full_chain(tmp_path):
     assert row[0] == str(files[0])
     assert row[1] == "privat"
     assert row[2] == "snippet"
-    # Ingest mit korrekten Argumenten aufgerufen
-    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[])
+    # Ingest mit korrekten Argumenten aufgerufen (node_set == record.id per Stufe 1.5)
+    record_id = store.conn.execute("SELECT id FROM sources").fetchone()[0]
+    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[record_id])
     # Job ist done
     assert q.status(jid) == "done"
     assert q.claim_next() is None
@@ -91,7 +92,8 @@ async def test_process_one_async_snippet_full_chain(tmp_path):
     files = list((tmp_path / "raw").glob("*.md"))
     assert len(files) == 1
     assert "Asynchroner Gedanke." in files[0].read_text()
-    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[])
+    record_id = store.conn.execute("SELECT id FROM sources").fetchone()[0]
+    ingest_mock.assert_awaited_once_with(None, files[0], "privat", node_sets=[record_id])
     assert q.status(jid) == "done"
 
 

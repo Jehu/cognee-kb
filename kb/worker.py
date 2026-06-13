@@ -36,14 +36,17 @@ async def process_one_async(instance: Instance | None, q: JobQueue,
         doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
         record = SourceRecord.new(
             type=job.kind, url=doc.url, video_id=doc.video_id,
-            locator=doc.locator, vault=vault.name, raw_md_path="")
+            locator=doc.locator, vault=vault.name, raw_md_path="",
+            title=doc.title)
         path, record = rawstore.write_raw(vault.raw_dir, doc.title, doc.body, record)
         store.insert(record)
-        node_set = job.payload.get("node_set")
+        # Stufe 1.5: node_set fällt per Default auf record.id zurück, damit jedes
+        # Dokument eine deterministische belongs_to_set-Kante trägt (Vorbereitung
+        # für späteren CYPHER-Herkunfts-Fallback). Ändert den Stufe-1-Pfad nicht.
+        node_set = job.payload.get("node_set") or record.id
         await cognee_io.ingest(
             instance, path, vault.dataset,
-            node_sets=node_set if isinstance(node_set, list)
-            else ([node_set] if node_set else []))
+            node_sets=node_set if isinstance(node_set, list) else [node_set])
         q.mark_done(job.id)
     except Exception as e:  # noqa: BLE001 — Worker darf nie sterben
         # Fängt nur Job-Fehler: asyncio.CancelledError ist BaseException und

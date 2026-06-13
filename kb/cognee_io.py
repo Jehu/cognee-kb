@@ -11,10 +11,14 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
 """
 
 import os
+import re
 from pathlib import Path
 
 from kb.config import Instance
 from kb.guard import assert_instance_env
+
+# Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
+_SOURCE_ID_RE = re.compile(r"source_id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
 def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
@@ -72,3 +76,72 @@ def _render(result) -> str:
     if isinstance(payload, list):
         return "\n".join(str(item) for item in payload)
     return str(payload)
+
+
+def _iter_strings(obj, depth: int = 0):
+    """Rekursiver Walker über alle String-Blätter eines Cognee-Suchergebnisses.
+
+    Defensiv implementiert weil die exakte Shape von cognee.search(CHUNKS)
+    je nach ACL-Modus variiert (SearchResult-Objekt, dict mit 'search_result',
+    ACL-dict mit Unterlisten, plain str) — analog zur Begründung bei _render.
+    Tiefenlimit verhindert Endlosrekursion bei unerwarteten Zyklen.
+    """
+    if depth > 6:
+        return
+    if isinstance(obj, str):
+        yield obj
+        return
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _iter_strings(v, depth + 1)
+        return
+    if isinstance(obj, (list, tuple)):
+        for item in obj:
+            yield from _iter_strings(item, depth + 1)
+        return
+    # Objekt (z. B. SearchResult): bekannte Attribute abtasten
+    for attr in ("text", "search_result", "payload"):
+        val = getattr(obj, attr, None)
+        if val is not None:
+            yield from _iter_strings(val, depth + 1)
+
+
+def _extract_source_ids(results) -> list[str]:
+    """Extrahiert deduplizierte source_ids aus CHUNKS-Suchergebnissen.
+
+    Jedes Ergebnis kann verschiedene Shapes haben (siehe _iter_strings),
+    daher werden alle String-Blätter durchsucht. Reihenfolge wird bewahrt.
+    """
+    seen: dict[str, None] = {}
+    for result in results:
+        for text in _iter_strings(result):
+            for match in _SOURCE_ID_RE.finditer(text):
+                seen[match.group(1)] = None
+    return list(seen.keys())
+
+
+async def query_with_sources(
+    instance: Instance, question: str, datasets: list[str]
+) -> tuple[str, list[str]]:
+    """Beantwortet eine Frage und liefert die zugehörigen source_ids.
+
+    Nutzt GRAPH_COMPLETION für die Antwort und CHUNKS für die Herkunfts-
+    Extraktion — graph-frei, nur via YAML-Frontmatter-Regex in den Chunks.
+    """
+    assert_instance_env(instance)
+    import cognee
+    from cognee import SearchType
+
+    results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text=question,
+        datasets=datasets,
+    )
+    answer = "\n".join(_render(r) for r in results)
+
+    chunk_results = await cognee.search(
+        query_type=SearchType.CHUNKS,
+        query_text=question,
+        datasets=datasets,
+    )
+    return answer, _extract_source_ids(chunk_results)
