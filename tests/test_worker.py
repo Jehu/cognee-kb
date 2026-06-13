@@ -10,7 +10,7 @@ from kb.worker import process_one, process_one_async, run_forever_async
 
 
 def make_vault(tmp_path) -> Vault:
-    return Vault(name="privat", instance="privat", dataset="privat",
+    return Vault(name="privat", instance="local", dataset="privat",
                  raw_dir=tmp_path / "raw")
 
 

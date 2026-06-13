@@ -137,4 +137,4 @@ def main(instance_name: str) -> None:
 
 
 if __name__ == "__main__":
-    main(os.environ.get("KB_MCP_INSTANCE", "privat"))
+    main(os.environ.get("KB_MCP_INSTANCE", "local"))

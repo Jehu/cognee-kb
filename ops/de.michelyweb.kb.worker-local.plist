@@ -3,17 +3,17 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>de.michelyweb.kb.worker-privat</string>
+    <key>Label</key><string>de.michelyweb.kb.worker-local</string>
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/uv</string>
         <string>run</string><string>kb</string>
-        <string>worker</string><string>privat</string>
+        <string>worker</string><string>local</string>
     </array>
     <key>WorkingDirectory</key><string>/Users/marco/coding/kb</string>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>/Users/marco/coding/kb/var/privat/worker.log</string>
-    <key>StandardErrorPath</key><string>/Users/marco/coding/kb/var/privat/worker.err</string>
+    <key>StandardOutPath</key><string>/Users/marco/coding/kb/var/local/worker.log</string>
+    <key>StandardErrorPath</key><string>/Users/marco/coding/kb/var/local/worker.err</string>
 </dict>
 </plist>

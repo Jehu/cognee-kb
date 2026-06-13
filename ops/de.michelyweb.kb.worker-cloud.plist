@@ -3,17 +3,17 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>de.michelyweb.kb.worker-business</string>
+    <key>Label</key><string>de.michelyweb.kb.worker-cloud</string>
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/uv</string>
         <string>run</string><string>kb</string>
-        <string>worker</string><string>business</string>
+        <string>worker</string><string>cloud</string>
     </array>
     <key>WorkingDirectory</key><string>/Users/marco/coding/kb</string>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>/Users/marco/coding/kb/var/business/worker.log</string>
-    <key>StandardErrorPath</key><string>/Users/marco/coding/kb/var/business/worker.err</string>
+    <key>StandardOutPath</key><string>/Users/marco/coding/kb/var/cloud/worker.log</string>
+    <key>StandardErrorPath</key><string>/Users/marco/coding/kb/var/cloud/worker.err</string>
 </dict>
 </plist>

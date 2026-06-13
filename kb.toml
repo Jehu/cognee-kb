@@ -1,0 +1,33 @@
+# Topologie der Knowledge Base — Single Source of Truth.
+# config.py lädt diese Datei; Umbenennen/Hinzufügen geschieht HIER, nicht im Code.
+#
+# Abgeleitet aus den Namen (Konvention, nicht doppelt pflegen):
+#   Wall  "<name>"  ->  Env-File .env.<name>,  Datenpfad var/<name>,  Port siehe unten
+#   Vault "<name>"  ->  Cognee-Dataset <name>,  Rohschicht raw/<name>
+# Hart erzwungen (nicht konfigurierbar):
+#   Embeddings = fastembed (ein Wechsel invalidiert alle Vektoren)
+#   mode "local" -> nur Ollama erlaubt (kein Cloud-Call) | mode "cloud" -> Cloud-LLM
+
+# --- Walls: getrennte Verarbeitungs-Instanzen (eigener Prozess, eigenes LLM) ---
+
+[walls.local]
+mode = "local"      # zwingend lokal: Inhalte verlassen den Rechner nie
+port = 8801
+
+[walls.cloud]
+mode = "cloud"      # Cloud-LLM (OpenRouter/DeepSeek) — alles geht an den Provider
+port = 8802
+
+# --- Vaults: thematische Sammlungen innerhalb einer Wall ---
+
+[[vaults]]
+name = "privat"
+wall = "local"
+
+[[vaults]]
+name = "business-ki"
+wall = "cloud"
+
+[[vaults]]
+name = "business-mwe"
+wall = "cloud"

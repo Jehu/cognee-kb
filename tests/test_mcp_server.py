@@ -21,14 +21,14 @@ async def _call(server, name, **kwargs) -> str:
 
 # --- Tool-Registrierung pro Instanz ---
 
-def test_privat_tools():
-    names = _tool_names(mcp_server.build_server("privat"))
+def test_local_tools():
+    names = _tool_names(mcp_server.build_server("local"))
     assert names == {"search_privat", "ingest", "job_status"}
     assert "search_all" not in names  # nur ein Vault
 
 
-def test_business_tools():
-    names = _tool_names(mcp_server.build_server("business"))
+def test_cloud_tools():
+    names = _tool_names(mcp_server.build_server("cloud"))
     assert names == {
         "search_business_ki", "search_business_mwe",
         "search_all", "ingest", "job_status"}
@@ -38,23 +38,23 @@ def test_business_tools():
 
 def test_ingest_foreign_vault_no_enqueue(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("privat")
-    # business-ki gehört nicht zur Instanz privat
+    server = mcp_server.build_server("local")
+    # business-ki gehört nicht zur Instanz local
     msg = asyncio.run(_call(server, "ingest", vault="business-ki", content="x"))
     assert "gehört nicht" in msg
     # Nichts enqueued: Queue-DB darf nicht existieren
-    assert not (tmp_path / "privat.db").exists()
+    assert not (tmp_path / "local.db").exists()
 
 
 def test_ingest_valid_vault_enqueues(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(
         server, "ingest", vault="privat",
         content="https://youtu.be/dQw4w9WgXcQ", node_set="musik"))
     assert "queued job" in msg
     jid = int(msg.split()[2])
-    info = JobQueue(tmp_path / "privat.db").info(jid)
+    info = JobQueue(tmp_path / "local.db").info(jid)
     assert info is not None
     assert info["status"] == "pending"
     assert info["kind"] == "youtube"
@@ -63,7 +63,7 @@ def test_ingest_valid_vault_enqueues(tmp_path, monkeypatch):
 
 def test_ingest_plain_text_snippet(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("business")
+    server = mcp_server.build_server("cloud")
     msg = asyncio.run(_call(
         server, "ingest", vault="business-ki", content="Nur ein Gedanke."))
     assert "(snippet)" in msg
@@ -73,14 +73,14 @@ def test_ingest_plain_text_snippet(tmp_path, monkeypatch):
 
 def test_job_status_foreign_vault(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "job_status", vault="business-ki", job_id=1))
     assert "gehört nicht" in msg
 
 
 def test_job_status_after_enqueue(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     ingest_msg = asyncio.run(_call(server, "ingest", vault="privat", content="Notiz"))
     jid = int(ingest_msg.split()[2])
     msg = asyncio.run(_call(server, "job_status", vault="privat", job_id=jid))
@@ -89,7 +89,7 @@ def test_job_status_after_enqueue(tmp_path, monkeypatch):
 
 def test_job_status_unknown_job(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "job_status", vault="privat", job_id=9999))
     assert "Unbekannter Job" in msg
 
@@ -138,7 +138,7 @@ def test_search_calls_correct_port_and_dataset(monkeypatch):
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
-    server = mcp_server.build_server("business")
+    server = mcp_server.build_server("cloud")
     answer = asyncio.run(_call(server, "search_business_mwe", question="Was ist X?"))
     assert answer == "42"
     url, payload = calls[0]
@@ -152,7 +152,7 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
-    server = mcp_server.build_server("business")
+    server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_business_ki", question="Was ist X?"))
     _, payload = calls[0]
     assert payload["datasets"] == ["business-ki"]
@@ -161,7 +161,7 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
 def test_search_200_without_answer_key_is_readable(monkeypatch):
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(payload={"error": "boom"})))
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "keine Antwort" in msg
     assert "boom" in msg
@@ -170,7 +170,7 @@ def test_search_200_without_answer_key_is_readable(monkeypatch):
 def test_search_non_200_returns_status_message(monkeypatch):
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(status_code=500)))
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "500" in msg
 
@@ -179,7 +179,7 @@ def test_search_all_uses_all_datasets(monkeypatch):
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
-    server = mcp_server.build_server("business")
+    server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_all", question="Y?"))
     _, payload = calls[0]
     assert set(payload["datasets"]) == {"business-ki", "business-mwe"}
@@ -188,7 +188,7 @@ def test_search_all_uses_all_datasets(monkeypatch):
 def test_search_instance_down_returns_readable_message(monkeypatch):
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(exc=httpx.ConnectError("zu")))
-    server = mcp_server.build_server("privat")
+    server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "nicht erreichbar" in msg
     assert "8801" in msg

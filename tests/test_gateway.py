@@ -88,7 +88,7 @@ def test_ingest_enqueues_youtube(client, tmp_path):
     assert body["vault"] == "privat"
     assert body["kind"] == "youtube"
     # Job liegt wirklich in der Queue der Instanz
-    info = JobQueue(tmp_path / "privat.db").info(body["job_id"])
+    info = JobQueue(tmp_path / "local.db").info(body["job_id"])
     assert info is not None
     assert info["status"] == "pending"
     assert info["kind"] == "youtube"
@@ -121,8 +121,8 @@ def test_vaults_lists_config(client):
     r = client.get("/api/vaults", headers=AUTH)
     assert r.status_code == 200
     names = {v["name"]: v["instance"] for v in r.json()}
-    assert names["privat"] == "privat"
-    assert names["business-ki"] == "business"
+    assert names["privat"] == "local"
+    assert names["business-ki"] == "cloud"
 
 
 def test_job_info_after_enqueue(client):
@@ -165,7 +165,7 @@ def test_query_proxies_to_instance(client, monkeypatch):
         "vault": "business-mwe", "question": "Was ist X?"})
     assert r.status_code == 200
     assert r.json() == {"vault": "business-mwe", "answer": "42"}
-    # Richtige Instanz (business → 8802) + Dataset des Vaults
+    # Richtige Instanz (cloud → 8802) + Dataset des Vaults
     url, payload = calls[0]
     assert url == "http://127.0.0.1:8802/query"
     assert payload == {"question": "Was ist X?", "datasets": ["business-mwe"]}

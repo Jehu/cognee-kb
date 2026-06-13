@@ -23,8 +23,8 @@ Read-Write-Prozess pro Datenbank-Verzeichnis. Daraus folgt:
 iOS-Kurzbefehl ─┐
 PWA (Browser) ──┼─► Gateway :8800 ──► enqueue → var/<instanz>/queue.db
 Agent/CLI ──────┘        │
-                         ├─► Proxy /query ─► privat   :8801 (127.0.0.1, Ollama+fastembed)
-                         └─► Proxy /query ─► business :8802 (127.0.0.1, OpenRouter+fastembed)
+                         ├─► Proxy /query ─► local    :8801 (127.0.0.1, Ollama+fastembed)
+                         └─► Proxy /query ─► cloud    :8802 (127.0.0.1, OpenRouter+fastembed)
 ```
 
 ## Ports (in `kb/config.py`)
@@ -32,8 +32,8 @@ Agent/CLI ──────┘        │
 | Dienst | Port | Bind |
 |---|---|---|
 | Gateway | 8800 | 0.0.0.0 (Tailscale schirmt ab) |
-| Instance privat | 8801 | 127.0.0.1 |
-| Instance business | 8802 | 127.0.0.1 |
+| Instance local | 8801 | 127.0.0.1 |
+| Instance cloud | 8802 | 127.0.0.1 |
 
 ## API-Kontrakt
 

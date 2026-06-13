@@ -11,8 +11,8 @@ from kb.queue import JobQueue
 
 
 def make_instance(tmp_path) -> Instance:
-    return Instance(name="privat", env_file=tmp_path / ".env.privat",
-                    expected_llm_provider="ollama",
+    return Instance(name="local", env_file=tmp_path / ".env.local",
+                    allowed_llm_providers=("ollama",),
                     expected_embedding_provider="fastembed",
                     var_dir=tmp_path, port=8801)
 
@@ -36,10 +36,10 @@ def inst(tmp_path, monkeypatch):
 # --- /health ---
 
 def test_health_reports_queue_counts(inst, tmp_path):
-    with TestClient(instance_service.create_app("privat")) as client:
+    with TestClient(instance_service.create_app("local")) as client:
         r = client.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"instance": "privat", "queue": {
+        assert r.json() == {"instance": "local", "queue": {
             "pending": 0, "running": 0, "done": 0, "failed": 0},
             "worker": "ok"}
         # Job enqueuen (eigene Connection, WAL) → pending=1
@@ -54,7 +54,7 @@ def test_health_reports_dead_worker(inst, monkeypatch, capsys):
         raise RuntimeError("kaputt")
 
     monkeypatch.setattr(worker, "run_forever_async", crashing_worker)
-    with TestClient(instance_service.create_app("privat")) as client:
+    with TestClient(instance_service.create_app("local")) as client:
         r = client.get("/health")
         assert r.status_code == 200
         assert r.json()["worker"] == "dead"
@@ -69,7 +69,7 @@ def test_health_reports_dead_worker(inst, monkeypatch, capsys):
 def test_query_calls_cognee_io(inst, monkeypatch):
     query_mock = AsyncMock(return_value="Antwort!")
     monkeypatch.setattr(cognee_io, "query", query_mock)
-    with TestClient(instance_service.create_app("privat")) as client:
+    with TestClient(instance_service.create_app("local")) as client:
         r = client.post("/query", json={
             "question": "Was ist X?", "datasets": ["privat"]})
     assert r.status_code == 200
@@ -89,7 +89,7 @@ def test_guard_failure_aborts_startup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(guard, "assert_instance_env", boom)
     with pytest.raises(EnvGuardError):
-        with TestClient(instance_service.create_app("privat")):
+        with TestClient(instance_service.create_app("local")):
             pass
 
 
@@ -106,7 +106,7 @@ def test_worker_task_started_and_cancelled_on_shutdown(inst, monkeypatch):
             raise
 
     monkeypatch.setattr(worker, "run_forever_async", fake_run_forever)
-    with TestClient(instance_service.create_app("privat")) as client:
+    with TestClient(instance_service.create_app("local")) as client:
         assert client.get("/health").status_code == 200
     # Shutdown hat den Background-Task gecancelt und sauber awaited
     assert state["started"] is True

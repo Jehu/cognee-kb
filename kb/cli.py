@@ -105,7 +105,7 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
 
 @app.command()
 def worker(instance: str):
-    """Startet den seriellen Worker einer Instanz (privat | business)."""
+    """Startet den seriellen Worker einer Instanz (local | cloud)."""
     from kb import worker as worker_mod
 
     inst = get_instance(instance)
@@ -137,7 +137,7 @@ def _load_env_file(path: Path) -> None:
 
 @app.command("serve-instance")
 def serve_instance(instance: str):
-    """Startet den Instance Service (privat | business) auf 127.0.0.1."""
+    """Startet den Instance Service (local | cloud) auf 127.0.0.1."""
     # Lazy-Imports: instance_service zieht cognee — nur in diesem Befehl laden.
     import uvicorn
 
@@ -149,7 +149,7 @@ def serve_instance(instance: str):
 
 @app.command("serve-mcp")
 def serve_mcp(instance: str):
-    """Startet den stdio-MCP-Server einer Instanz (privat | business)."""
+    """Startet den stdio-MCP-Server einer Instanz (local | cloud)."""
     # Lazy-Import (wie worker/gateway) — mcp_server bleibt cognee-frei.
     from kb import mcp_server
 

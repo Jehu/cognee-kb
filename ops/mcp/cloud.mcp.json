@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "kb-privat": {
+    "kb-cloud": {
       "command": "uv",
-      "args": ["run", "kb", "serve-mcp", "privat"],
+      "args": ["run", "kb", "serve-mcp", "cloud"],
       "cwd": "/Users/marco/coding/kb",
       "env": {
-        "KB_MCP_INSTANCE": "privat"
+        "KB_MCP_INSTANCE": "cloud"
       }
     }
   }

@@ -3,16 +3,16 @@
 Pro Instanz läuft ein dünner stdio-MCP-Server (`kb serve-mcp <instance>`), der
 OHNE cognee-Import auskommt: Queries proxyt er per httpx an den Instance Service,
 Ingest schreibt er direkt in die SQLite-Queue. **Voraussetzung ist daher ein
-laufender Instance Service** (privat :8801 / business :8802) — sonst antworten
+laufender Instance Service** (local :8801 / cloud :8802) — sonst antworten
 die `search_*`-Tools mit „Instance Service nicht erreichbar".
 
 ```sh
-uv run kb serve-instance privat     # bzw. business — muss laufen, bevor der MCP nützt
+uv run kb serve-instance local     # bzw. cloud — muss laufen, bevor der MCP nützt
 ```
 
 ## Tools pro Instanz
 
-### privat
+### local
 
 | Tool | Was es tut |
 |---|---|
@@ -20,7 +20,7 @@ uv run kb serve-instance privat     # bzw. business — muss laufen, bevor der M
 | `ingest(vault, content, node_set?)` | Inhalt (URL/Text/YouTube) in die Queue eines Instanz-Vaults legen. |
 | `job_status(vault, job_id)` | Status/Fehler eines Queue-Jobs nachschlagen. |
 
-### business
+### cloud
 
 | Tool | Was es tut |
 |---|---|
@@ -45,10 +45,10 @@ umbenennen:
 
 ```sh
 # in einem privaten Projekt:
-cp /Users/marco/coding/kb/ops/mcp/privat.mcp.json /pfad/zum/privaten/projekt/.mcp.json
+cp /Users/marco/coding/kb/ops/mcp/local.mcp.json /pfad/zum/privaten/projekt/.mcp.json
 
 # in einem Business-Projekt:
-cp /Users/marco/coding/kb/ops/mcp/business.mcp.json /pfad/zum/business/projekt/.mcp.json
+cp /Users/marco/coding/kb/ops/mcp/cloud.mcp.json /pfad/zum/business/projekt/.mcp.json
 ```
 
 Existiert im Zielprojekt bereits eine `.mcp.json`, den `mcpServers`-Eintrag von
@@ -65,10 +65,10 @@ Hand einfügen statt die Datei zu überschreiben.
 
 ```sh
 # Business-Projekt:
-claude mcp add --scope project --transport stdio kb-business -- uv run kb serve-mcp business
+claude mcp add --scope project --transport stdio kb-cloud -- uv run kb serve-mcp cloud
 
 # Privates Projekt:
-claude mcp add --scope project --transport stdio kb-privat -- uv run kb serve-mcp privat
+claude mcp add --scope project --transport stdio kb-local -- uv run kb serve-mcp local
 ```
 
 Das schreibt denselben Eintrag in die `.mcp.json` des aktuellen Projekts. `cwd`
@@ -77,16 +77,16 @@ wenn es von dort erreichbar ist; andernfalls Weg A mit explizitem `cwd` nutzen.
 
 ## ⚠️ Isolation — Privacy-Wand auf MCP-Ebene
 
-**Der privat-MCP darf NIEMALS user-scope (global) registriert werden.**
+**Der local-MCP darf NIEMALS user-scope (global) registriert werden.**
 
 User-scope (`--scope user`) lädt einen MCP-Server in **jedem** Projekt auf der
-Maschine. Würde der privat-MCP so registriert, landeten private Inhalte in
+Maschine. Würde der local-MCP so registriert, landeten private Inhalte in
 Business- und fremden Kontexten — die Vault-Trennung wäre durchbrochen.
 
 Regeln:
 
-- **privat-MCP** nur in die `.mcp.json` **privater** Projekte.
-- **business-MCP** nur in die `.mcp.json` von **Business**-Projekten.
+- **local-MCP** nur in die `.mcp.json` **privater** Projekte.
+- **cloud-MCP** nur in die `.mcp.json` von **Business**-Projekten.
 - **Nie `--scope user`** für einen kb-MCP. Immer `--scope project`.
 
 project-scope verlangt beim ersten Start eine **einmalige Approval pro Projekt**
