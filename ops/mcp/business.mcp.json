@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kb-business": {
+      "command": "uv",
+      "args": ["run", "kb", "serve-mcp", "business"],
+      "cwd": "/Users/marco/coding/kb",
+      "env": {
+        "KB_MCP_INSTANCE": "business"
+      }
+    }
+  }
+}

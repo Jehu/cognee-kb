@@ -147,6 +147,16 @@ def serve_instance(instance: str):
     uvicorn.run(instance_service.create_app(instance), host="127.0.0.1", port=inst.port)
 
 
+@app.command("serve-mcp")
+def serve_mcp(instance: str):
+    """Startet den stdio-MCP-Server einer Instanz (privat | business)."""
+    # Lazy-Import (wie worker/gateway) — mcp_server bleibt cognee-frei.
+    from kb import mcp_server
+
+    get_instance(instance)  # früh fehlschlagen bei unbekannter Instanz
+    mcp_server.build_server(instance).run(transport="stdio")
+
+
 @app.command("serve-gateway")
 def serve_gateway():
     """Startet das Gateway (Auth, Enqueue, Query-Proxy, PWA) auf Port 8800."""

@@ -49,3 +49,22 @@ uv run kb serve-gateway
 
 Zugriff von unterwegs über Tailscale (kein offener Port nötig);
 iOS-Teilen-Sheet → Knowledge Base: siehe `ops/ios-kurzbefehl.md`.
+
+## Phase 3 — MCP (Agent-Zugriff)
+
+Pro Instanz ein eigener dünner stdio-MCP-Server (`kb/mcp_server.py`) statt des
+offiziellen `cognee-mcp`: Letzterer öffnet eine eigene Kuzu-RW-Instanz, und Kuzu
+ist strikt single-writer — neben dem laufenden Instance Service führt das zum
+Lock-Crash oder zu divergierenden Daten. Der eigene Server bleibt cognee-frei,
+proxyt Queries per httpx an den Instance Service und schreibt Ingest direkt in
+die Queue. Tools werden dynamisch aus den Vaults der Instanz registriert
+(privat: `search_privat`; business: `search_business_ki`, `search_business_mwe`,
+`search_all`; je `ingest` + `job_status`).
+
+```sh
+uv run kb serve-mcp privat     # bzw. business — Instance Service muss laufen
+```
+
+Registrierung in Claude Code (project-scope, Isolations-Regeln, Verifikation):
+siehe `ops/mcp-setup.md`. Kopiervorlagen: `ops/mcp/privat.mcp.json` und
+`ops/mcp/business.mcp.json`.
