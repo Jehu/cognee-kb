@@ -69,9 +69,22 @@ def create_app(instance_name: str) -> FastAPI:
 
     @app.post("/query")
     async def query(body: QueryBody) -> dict:
-        answer = await cognee_io.query(
+        answer, source_ids = await cognee_io.query_with_sources(
             app.state.inst, body.question, datasets=body.datasets)
-        return {"answer": answer}
+        sources = []
+        for sid in source_ids:
+            rec = app.state.store.get(sid)
+            if rec is None:
+                continue
+            sources.append({
+                "source_id": rec.id,
+                "type": rec.type,
+                "url": rec.url,
+                "locator": rec.locator,
+                "raw_md_path": rec.raw_md_path,
+                "title": rec.title,
+            })
+        return {"answer": answer, "sources": sources}
 
     @app.get("/health")
     async def health() -> dict:

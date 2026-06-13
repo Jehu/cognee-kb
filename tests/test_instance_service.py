@@ -8,6 +8,7 @@ from kb import cognee_io, guard, instance_service, worker
 from kb.config import Instance
 from kb.guard import EnvGuardError
 from kb.queue import JobQueue
+from kb.sources import SourceRecord, SourceStore
 
 
 def make_instance(tmp_path) -> Instance:
@@ -67,14 +68,62 @@ def test_health_reports_dead_worker(inst, monkeypatch, capsys):
 # --- /query ---
 
 def test_query_calls_cognee_io(inst, monkeypatch):
-    query_mock = AsyncMock(return_value="Antwort!")
-    monkeypatch.setattr(cognee_io, "query", query_mock)
+    query_mock = AsyncMock(return_value=("Antwort!", []))
+    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
     with TestClient(instance_service.create_app("local")) as client:
         r = client.post("/query", json={
             "question": "Was ist X?", "datasets": ["privat"]})
     assert r.status_code == 200
-    assert r.json() == {"answer": "Antwort!"}
+    assert r.json() == {"answer": "Antwort!", "sources": []}
     query_mock.assert_awaited_once_with(inst, "Was ist X?", datasets=["privat"])
+
+
+def test_query_returns_sources(inst, tmp_path, monkeypatch):
+    # source_ids enthalten "sid1" — ein passender Record liegt in der Store-DB.
+    query_mock = AsyncMock(return_value=("A", ["sid1"]))
+    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
+
+    rec = SourceRecord(
+        id="sid1",
+        type="snippet",
+        url=None,
+        video_id=None,
+        locator=None,
+        fetched_at="2026-01-01T00:00:00Z",
+        vault="privat",
+        raw_md_path="raw/privat/x.md",
+        title="Testtitel",
+    )
+
+    # Record über eine eigene Connection einfügen — SourceStore.conn ist
+    # thread-gebunden; die App-interne Connection läuft im ASGI-Thread.
+    SourceStore(tmp_path / "sources.db").insert(rec)
+
+    with TestClient(instance_service.create_app("local")) as client:
+        r = client.post("/query", json={
+            "question": "Was?", "datasets": ["privat"]})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["answer"] == "A"
+    assert body["sources"] == [{
+        "source_id": "sid1",
+        "type": "snippet",
+        "url": None,
+        "locator": None,
+        "raw_md_path": "raw/privat/x.md",
+        "title": "Testtitel",
+    }]
+
+
+def test_query_skips_unknown_source_ids(inst, monkeypatch):
+    # source_id ohne passenden DB-Record → wird übersprungen, kein Crash.
+    query_mock = AsyncMock(return_value=("B", ["unbekannt"]))
+    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
+    with TestClient(instance_service.create_app("local")) as client:
+        r = client.post("/query", json={"question": "?", "datasets": ["privat"]})
+    assert r.status_code == 200
+    assert r.json() == {"answer": "B", "sources": []}
 
 
 # --- Lifespan ---

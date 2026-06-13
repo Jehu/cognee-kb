@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from kb import gateway
 from kb.queue import JobQueue
+from kb.sources import SourceRecord, SourceStore
 
 TOKEN = "test-token-123"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -164,7 +165,7 @@ def test_query_proxies_to_instance(client, monkeypatch):
     r = client.post("/api/query", headers=AUTH, json={
         "vault": "business-mwe", "question": "Was ist X?"})
     assert r.status_code == 200
-    assert r.json() == {"vault": "business-mwe", "answer": "42"}
+    assert r.json() == {"vault": "business-mwe", "answer": "42", "sources": []}
     # Richtige Instanz (cloud → 8802) + Dataset des Vaults
     url, payload = calls[0]
     assert url == "http://127.0.0.1:8802/query"
@@ -192,4 +193,75 @@ def test_query_read_error_returns_502(client, monkeypatch):
 def test_query_unknown_vault(client):
     r = client.post("/api/query", headers=AUTH, json={
         "vault": "geheim", "question": "x"})
+    assert r.status_code == 404
+
+
+# --- Raw-Source-Endpoint ---
+
+@pytest.fixture
+def source_client(tmp_path, monkeypatch):
+    """Client mit gepatchtem sources_path (business-mwe → cloud-Instanz)."""
+    monkeypatch.setenv("KB_API_TOKEN", TOKEN)
+    monkeypatch.setattr("kb.gateway.queue_path",
+                        lambda inst: tmp_path / f"{inst}.db")
+    monkeypatch.setattr("kb.gateway.sources_path",
+                        lambda inst: tmp_path / f"{inst}_sources.db")
+    return TestClient(gateway.create_app())
+
+
+def _insert_source_record(tmp_path, source_id: str, vault: str,
+                          raw_md_path: str, instance: str = "cloud") -> None:
+    """Hilfsfunktion: Record in die gemockte sources.db einfügen."""
+    store = SourceStore(tmp_path / f"{instance}_sources.db")
+    rec = SourceRecord(
+        id=source_id,
+        type="snippet",
+        url=None,
+        video_id=None,
+        locator=None,
+        fetched_at="2026-01-01T00:00:00Z",
+        vault=vault,
+        raw_md_path=raw_md_path,
+        title="Testquelle",
+    )
+    store.insert(rec)
+
+
+def test_source_raw_returns_markdown(source_client, tmp_path):
+    # Markdown-Datei anlegen
+    md = tmp_path / "x.md"
+    md.write_text("# Hallo\nInhalt hier.")
+    _insert_source_record(tmp_path, "src1", "business-mwe", str(md))
+    r = source_client.get("/api/source/business-mwe/src1/raw", headers=AUTH)
+    assert r.status_code == 200
+    assert "Inhalt hier" in r.text
+
+
+def test_source_raw_requires_token(source_client, tmp_path):
+    md = tmp_path / "x.md"
+    md.write_text("geheim")
+    _insert_source_record(tmp_path, "src2", "business-mwe", str(md))
+    r = source_client.get("/api/source/business-mwe/src2/raw")
+    assert r.status_code == 401
+
+
+def test_source_raw_unknown_id_returns_404(source_client):
+    r = source_client.get("/api/source/business-mwe/nichtexistent/raw", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_source_raw_cross_vault_blocked(source_client, tmp_path):
+    # Record gehört zu "business-ki", Abruf über "business-mwe" → 404 (kein Leak)
+    md = tmp_path / "y.md"
+    md.write_text("vertraulich")
+    _insert_source_record(tmp_path, "src3", "business-ki", str(md))
+    r = source_client.get("/api/source/business-mwe/src3/raw", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_source_raw_missing_file_returns_404(source_client, tmp_path):
+    # Record existiert, Datei aber nicht mehr auf der Platte
+    _insert_source_record(tmp_path, "src4", "business-mwe",
+                          str(tmp_path / "weg.md"))
+    r = source_client.get("/api/source/business-mwe/src4/raw", headers=AUTH)
     assert r.status_code == 404

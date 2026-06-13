@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +25,7 @@ from kb.config import (
     get_vault,
 )
 from kb.queue import JobQueue
+from kb.sources import SourceStore
 
 QUERY_TIMEOUT = 120.0   # GRAPH_COMPLETION kann dauern
 HEALTH_TIMEOUT = 2.0
@@ -31,6 +33,10 @@ HEALTH_TIMEOUT = 2.0
 
 def queue_path(instance_name: str) -> Path:
     return get_instance(instance_name).var_dir / "queue.db"
+
+
+def sources_path(instance_name: str) -> Path:
+    return get_instance(instance_name).var_dir / "sources.db"
 
 
 def require_token(authorization: str | None = Header(default=None)) -> None:
@@ -108,7 +114,24 @@ def create_app() -> FastAPI:
         if r.status_code != 200:
             raise HTTPException(
                 502, f"Instance Service '{inst.name}' antwortete mit {r.status_code}")
-        return {"vault": v.name, "answer": r.json()["answer"]}
+        body = r.json()
+        return {"vault": v.name, "answer": body["answer"], "sources": body.get("sources", [])}
+
+    @api.get("/source/{vault}/{source_id}/raw")
+    def source_raw(vault: str, source_id: str):
+        v = _resolve_vault(vault)
+        # SourceStore pro Request — wie JobQueue bei /ingest: sqlite3-Connections
+        # sind thread-gebunden, uvicorn fährt den sync-Handler im Thread-Pool.
+        store = SourceStore(sources_path(v.instance))
+        rec = store.get(source_id)
+        # Vault-Scope: Quelle MUSS zum angefragten Vault gehören — sonst Cross-Vault-Leak
+        # (Vaults einer Instanz teilen sich die sources.db).
+        if rec is None or rec.vault != v.name:
+            raise HTTPException(404, "Unbekannte Quelle")
+        p = Path(rec.raw_md_path)
+        if not p.is_file():
+            raise HTTPException(404, "Rohdatei nicht gefunden")
+        return FileResponse(p, media_type="text/markdown")
 
     @api.get("/jobs/{vault}/{job_id}")
     def job_info(vault: str, job_id: int) -> dict:
