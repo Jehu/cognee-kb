@@ -1,6 +1,6 @@
 // Minimaler Service Worker: App-Shell-Cache, network-first für /api.
-const CACHE = 'kb-shell-v1';
-const SHELL = ['/', '/chat', '/settings', '/manifest.webmanifest', '/icons/icon.svg'];
+const CACHE = 'kb-shell-v2';
+const SHELL = ['/', '/chat/', '/settings/', '/manifest.webmanifest', '/icons/icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -26,7 +26,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App-Shell: cache-first, im Hintergrund aktualisieren.
+  // Navigationen: network-first. Eine redirected Response (z.B. /chat -> /chat/)
+  // darf NICHT direkt an eine Navigation zurückgegeben werden — sonst bricht der
+  // Browser ab. Daher neu verpacken; offline aus dem Shell-Cache bedienen.
+  if (event.request.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(event.request);
+        if (res.redirected) {
+          const body = await res.blob();
+          return new Response(body, {
+            status: res.status, statusText: res.statusText, headers: res.headers });
+        }
+        return res;
+      } catch {
+        return (await caches.match(event.request)) || (await caches.match('/'));
+      }
+    })());
+    return;
+  }
+
+  // Statische Assets: cache-first, im Hintergrund aktualisieren.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fresh = fetch(event.request)

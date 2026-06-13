@@ -3,8 +3,8 @@ const { title = 'KB' } = Astro.props;
 const path = Astro.url.pathname;
 const nav = [
   { href: '/', label: 'Ingest' },
-  { href: '/chat', label: 'Chat' },
-  { href: '/settings', label: 'Einstellungen' },
+  { href: '/chat/', label: 'Chat' },
+  { href: '/settings/', label: 'Einstellungen' },
 ];
 const isActive = (href) =>
   href === '/' ? path === '/' : path === href || path === href + '/';
