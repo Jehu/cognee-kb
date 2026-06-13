@@ -28,6 +28,9 @@ const isActive = (href) =>
         ))}
       </nav>
     </header>
+    <div id="token-hinweis" class="token-hinweis hidden">
+      Kein API-Token gesetzt — <a href="/settings/">in den Einstellungen eintragen</a>.
+    </div>
     <main>
       <slot />
     </main>
@@ -35,6 +38,14 @@ const isActive = (href) =>
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
       }
+      // Dezenter Hinweis, wenn ohne Token geladen wird (außer auf /settings).
+      (() => {
+        const el = document.getElementById('token-hinweis');
+        if (!el) return;
+        const hasToken = !!localStorage.getItem('kb_token');
+        const onSettings = location.pathname.replace(/\/$/, '') === '/settings';
+        if (!hasToken && !onSettings) el.classList.remove('hidden');
+      })();
     </script>
     <style is:global>
       :root {
@@ -111,6 +122,17 @@ const isActive = (href) =>
       .status.error { color: var(--error); border-color: var(--error); }
       .status.ok { color: var(--ok); border-color: var(--ok); }
       .hidden { display: none; }
+      .token-hinweis {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+      }
+      .token-hinweis a { color: var(--accent); font-weight: 600; }
     </style>
   </body>
 </html>
