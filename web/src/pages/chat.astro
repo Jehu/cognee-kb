@@ -16,7 +16,7 @@ import Base from '../layouts/Base.astro';
   <div id="error" class="status error hidden"></div>
 
   <script>
-    import { api, initVaultSelect } from '../lib/api.js';
+    import { api, initVaultSelect, openSourceRaw } from '../lib/api.js';
 
     const vaultSel = document.getElementById('vault');
     const historyEl = document.getElementById('history');
@@ -31,7 +31,16 @@ import Base from '../layouts/Base.astro';
       submit.disabled = false;
     });
 
-    const history = []; // { role, text, vault } — nur im Speicher
+    const history = []; // { role, text, vault, sources? } — nur im Speicher
+
+    // Letzten Dateiname ohne .md-Suffix aus einem Pfad extrahieren.
+    function stem(path) {
+      if (!path) return '';
+      const part = path.split('/').pop() || '';
+      return part.endsWith('.md') ? part.slice(0, -3) : part;
+    }
+
+    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄' };
 
     function render() {
       historyEl.innerHTML = '';
@@ -45,6 +54,53 @@ import Base from '../layouts/Base.astro';
         body.className = 'body';
         body.textContent = msg.text; // Zeilenumbrüche via CSS white-space
         div.append(meta, body);
+
+        // Quellen-Sektion nur für Assistant-Nachrichten
+        if (msg.role === 'assistant') {
+          const sources = msg.sources || [];
+          const sec = document.createElement('div');
+          sec.className = 'sources';
+          if (sources.length === 0) {
+            const none = document.createElement('span');
+            none.className = 'sources-none';
+            none.textContent = 'Keine Quelle gefunden';
+            sec.appendChild(none);
+          } else {
+            const label = document.createElement('span');
+            label.className = 'sources-label';
+            label.textContent = 'Quellen';
+            sec.appendChild(label);
+            for (const src of sources) {
+              const icon = TYPE_ICON[src.type] || '📄';
+              const displayTitle = src.title || stem(src.raw_md_path) || src.type;
+
+              if (src.url) {
+                // Web / YouTube: externer Link als <a>
+                const chip = document.createElement('a');
+                chip.className = 'source-chip';
+                chip.href = src.url;
+                chip.target = '_blank';
+                chip.rel = 'noopener noreferrer';
+                // textContent verhindert XSS — Titel/Locator werden nie via innerHTML gesetzt
+                chip.textContent = `${icon} ${displayTitle}${src.locator ? ` · ${src.locator}` : ''}`;
+                sec.appendChild(chip);
+              } else {
+                // Snippet / File: tokengeschützter Raw-Download via Header
+                const chip = document.createElement('button');
+                chip.className = 'source-chip';
+                chip.type = 'button';
+                chip.textContent = `${icon} ${displayTitle}${src.locator ? ` · ${src.locator}` : ''}`;
+                // Closure über src und msg.vault
+                const vault = msg.vault;
+                const sourceId = src.source_id;
+                chip.addEventListener('click', () => openSourceRaw(vault, sourceId));
+                sec.appendChild(chip);
+              }
+            }
+          }
+          div.appendChild(sec);
+        }
+
         historyEl.appendChild(div);
       }
       historyEl.lastElementChild?.scrollIntoView({ block: 'end' });
@@ -66,7 +122,7 @@ import Base from '../layouts/Base.astro';
           method: 'POST',
           body: JSON.stringify({ vault, question }),
         });
-        history.push({ role: 'assistant', text: res.answer, vault: res.vault || vault });
+        history.push({ role: 'assistant', text: res.answer, vault: res.vault || vault, sources: res.sources || [] });
         render();
       } catch (e) {
         errorEl.textContent = e.message;
@@ -89,5 +145,48 @@ import Base from '../layouts/Base.astro';
     .msg.user { border-color: var(--accent); }
     .msg .meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.3rem; }
     .msg .body { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+    .sources {
+      margin-top: 0.5rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .sources-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 0.15rem;
+    }
+    .sources-none {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .source-chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.72rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      max-width: 18rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: inherit;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .source-chip:hover {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    }
   </style>
 </Base>

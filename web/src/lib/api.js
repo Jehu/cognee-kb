@@ -53,6 +53,28 @@ export async function loadVaults() {
   return STATIC_VAULTS;
 }
 
+// Token bleibt im Authorization-Header, nie in der URL — sonst landet er im
+// Server-Log und in der Browser-History (Privacy-Wand würde brechen).
+export async function openSourceRaw(vault, sourceId) {
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(
+      `/api/source/${encodeURIComponent(vault)}/${encodeURIComponent(sourceId)}/raw`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+  } catch {
+    alert('Quelle nicht erreichbar (Netzwerkfehler).');
+    return;
+  }
+  if (res.status === 401) { alert('Nicht autorisiert — Token in Einstellungen prüfen.'); return; }
+  if (res.status === 404) { alert('Quelle nicht gefunden.'); return; }
+  if (!res.ok) { alert(`Fehler ${res.status} beim Laden der Quelle.`); return; }
+  const blob = await res.blob();
+  const u = URL.createObjectURL(blob);
+  window.open(u, '_blank');
+}
+
 // <select> mit Vaults befüllen, Standard-Vault vorauswählen.
 export async function initVaultSelect(select) {
   const names = await loadVaults();
