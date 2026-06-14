@@ -30,7 +30,7 @@ def test_local_tools():
 def test_cloud_tools():
     names = _tool_names(mcp_server.build_server("cloud"))
     assert names == {
-        "search_business_ki", "search_business_mwe",
+        "search_allgemein", "search_business_ki", "search_business_mwe",
         "search_all", "ingest", "job_status"}
 
 
@@ -182,7 +182,7 @@ def test_search_all_uses_all_datasets(monkeypatch):
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_all", question="Y?"))
     _, payload = calls[0]
-    assert set(payload["datasets"]) == {"business-ki", "business-mwe"}
+    assert set(payload["datasets"]) == {"allgemein", "business-ki", "business-mwe"}
 
 
 def test_search_instance_down_returns_readable_message(monkeypatch):

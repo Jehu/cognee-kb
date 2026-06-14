@@ -3,7 +3,7 @@ from kb.config import get_vault, get_instance, UnknownVaultError, ConfigError, V
 
 
 def test_vault_registry_complete():
-    assert set(VAULTS) == {"privat", "business-ki", "business-mwe"}
+    assert set(VAULTS) == {"privat", "allgemein", "business-ki", "business-mwe"}
 
 
 def test_privat_vault_maps_to_local_instance():

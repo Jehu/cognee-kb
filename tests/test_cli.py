@@ -43,3 +43,26 @@ def test_serve_befehle_registriert():
     assert result.exit_code == 0
     assert "serve-instance" in result.output
     assert "serve-gateway" in result.output
+    assert "restart" in result.output
+
+
+def test_restart_target_resolves_wall():
+    from kb.cli import _restart_target
+    port, argv, log = _restart_target("local")
+    assert port == 8801
+    assert argv == ["serve-instance", "local"]
+    assert log.name == "serve.log"
+
+
+def test_restart_target_resolves_gateway():
+    from kb.cli import _restart_target
+    port, argv, _ = _restart_target("gateway")
+    assert port == 8800
+    assert argv == ["serve-gateway"]
+
+
+def test_restart_rejects_unknown_target():
+    # Schlägt fehl, BEVOR irgendein Prozess angefasst wird (kein lsof/kill/spawn).
+    result = runner.invoke(app, ["restart", "bogus"])
+    assert result.exit_code != 0
+    assert "Unbekanntes Ziel" in result.output

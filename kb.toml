@@ -25,6 +25,10 @@ name = "privat"
 wall = "local"
 
 [[vaults]]
+name = "allgemein"
+wall = "cloud"
+
+[[vaults]]
 name = "business-ki"
 wall = "cloud"
 

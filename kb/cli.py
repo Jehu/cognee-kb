@@ -6,6 +6,8 @@ import typer
 from kb import cognee_io
 from kb.classify import build_payload
 from kb.config import (
+    GATEWAY_PORT,
+    INSTANCES,
     ROOT,
     Instance,
     UnknownVaultError,
@@ -178,6 +180,93 @@ def serve_gateway():
             err=True,
         )
     uvicorn.run(gateway.create_app(), host="0.0.0.0", port=GATEWAY_PORT)
+
+
+def _pids_on_port(port: int) -> list[int]:
+    """PIDs, die auf dem TCP-Port LISTEN. Der Port ist der eindeutige Anker —
+    genau der Prozess, der den Port hält, hält auch den Kuzu-Lock (kein
+    fehleranfälliges Prozessnamen-Matching)."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["lsof", "-t", "-i", f"tcp:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True).stdout
+    except FileNotFoundError:
+        raise typer.BadParameter("`lsof` nicht gefunden — `kb restart` benötigt lsof")
+    return [int(x) for x in out.split()]
+
+
+def _restart_target(target: str) -> tuple[int, list[str], Path]:
+    """(Port, serve-Argv, Logdatei) für ein Restart-Ziel. KeyError bei unbekannt."""
+    if target == "gateway":
+        return GATEWAY_PORT, ["serve-gateway"], ROOT / "var" / "gateway.log"
+    inst = get_instance(target)  # KeyError bei unbekannter Wall
+    return inst.port, ["serve-instance", target], inst.var_dir / "logs" / "serve.log"
+
+
+@app.command()
+def restart(target: str):
+    """Stoppt den Prozess auf dem Port des Ziels und startet ihn frisch (detached).
+
+    target: eine Wall (local | cloud) -> deren Instance Service,
+            'gateway' -> das Gateway, oder 'all' -> alle.
+
+    Nötig nach kb.toml-Änderungen: die Server halten die Topologie als
+    Schnappschuss vom Start (config.py lädt kb.toml nur beim Import). CLI-Befehle
+    wie ingest/query lesen sie hingegen bei jedem Aufruf frisch.
+    """
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    targets = [*INSTANCES.keys(), "gateway"] if target == "all" else [target]
+    kb_bin = Path(sys.executable).with_name("kb")  # gleicher venv, kein uv-Overhead
+
+    for t in targets:
+        try:
+            port, argv, log = _restart_target(t)
+        except KeyError:
+            raise typer.BadParameter(
+                f"Unbekanntes Ziel {t!r} — erlaubt: {', '.join(INSTANCES)}, gateway, all")
+
+        def _kill(pid: int, sig: int) -> None:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass  # schon weg
+
+        # 1. laufenden Port-Halter beenden: SIGTERM, nach Karenz hart SIGKILL
+        old = _pids_on_port(port)
+        for pid in old:
+            _kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            if not _pids_on_port(port):
+                break
+            time.sleep(0.5)
+        else:
+            for pid in _pids_on_port(port):
+                _kill(pid, signal.SIGKILL)
+            time.sleep(0.5)
+
+        # 2. frisch + detached starten (überlebt das Ende dieses Befehls)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a") as f:
+            proc = subprocess.Popen(
+                [str(kb_bin), *argv], stdout=f, stderr=f, start_new_session=True)
+
+        # 3. kurz auf Bereitschaft warten (Port wieder belegt)
+        ready = False
+        for _ in range(40):  # ~20s
+            time.sleep(0.5)
+            if _pids_on_port(port):
+                ready = True
+                break
+        gone = ",".join(map(str, old)) if old else "(lief nicht)"
+        state = "bereit" if ready else f"gestartet, noch nicht bereit — Log: {log}"
+        typer.echo(f"{t}: beendet {gone} -> PID {proc.pid}, Port {port} — {state}")
 
 
 if __name__ == "__main__":
