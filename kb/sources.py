@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS sources (
     fetched_at TEXT NOT NULL,
     vault TEXT NOT NULL,
     raw_md_path TEXT NOT NULL,
-    title TEXT
+    title TEXT,
+    content_hash TEXT
 );
 """
 
@@ -47,7 +48,8 @@ class SourceRecord:
     fetched_at: str    # ISO-8601 UTC
     vault: str
     raw_md_path: str
-    title: str | None = None  # Optional: frozen dataclass verlangt Default-Felder zuletzt
+    title: str | None = None         # Optional: frozen dataclass verlangt Default-Felder zuletzt
+    content_hash: str | None = None  # sha256 des Bodys — für Ingest-Dedup pro Vault
 
     @classmethod
     def new(cls, **kwargs) -> "SourceRecord":
@@ -70,27 +72,35 @@ class SourceStore:
         self.conn.executescript(SCHEMA)
         # Migration für Bestands-DBs: ALTER schlägt fehl, wenn die Spalte
         # bereits existiert (frische oder schon migrierte DB) — Fehler schlucken.
-        try:
-            self.conn.execute("ALTER TABLE sources ADD COLUMN title TEXT")
-            self.conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        for col in ("title", "content_hash"):
+            try:
+                self.conn.execute(f"ALTER TABLE sources ADD COLUMN {col} TEXT")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
     def insert(self, r: SourceRecord) -> None:
         # Explizite Spaltennamen notwendig: ALTER TABLE hängt title ans Ende,
         # Positions-INSERT würde nach Schema-Erweiterung falsch greifen.
         self.conn.execute(
-            "INSERT INTO sources (id,type,url,video_id,locator,fetched_at,vault,raw_md_path,title) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO sources "
+            "(id,type,url,video_id,locator,fetched_at,vault,raw_md_path,title,content_hash) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (r.id, r.type, r.url, r.video_id, r.locator, r.fetched_at,
-             r.vault, r.raw_md_path, r.title),
+             r.vault, r.raw_md_path, r.title, r.content_hash),
         )
         self.conn.commit()
 
+    _COLS = "id,type,url,video_id,locator,fetched_at,vault,raw_md_path,title,content_hash"
+
     def get(self, source_id: str) -> SourceRecord | None:
         row = self.conn.execute(
-            "SELECT id,type,url,video_id,locator,fetched_at,vault,raw_md_path,title "
-            "FROM sources WHERE id=?", (source_id,)).fetchone()
-        if row is None:
-            return None
-        return SourceRecord(*row)
+            f"SELECT {self._COLS} FROM sources WHERE id=?", (source_id,)).fetchone()
+        return SourceRecord(*row) if row else None
+
+    def find_by_hash(self, content_hash: str, vault: str) -> SourceRecord | None:
+        """Erste Quelle mit gleichem Body-Hash im selben Vault — für Ingest-Dedup."""
+        row = self.conn.execute(
+            f"SELECT {self._COLS} FROM sources WHERE content_hash=? AND vault=? LIMIT 1",
+            (content_hash, vault)).fetchone()
+        return SourceRecord(*row) if row else None

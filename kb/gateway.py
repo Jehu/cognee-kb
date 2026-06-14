@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from kb.classify import classify
+from kb.classify import build_payload
 from kb.config import (
     INSTANCES,
     ROOT,
@@ -82,19 +82,14 @@ def create_app() -> FastAPI:
     @api.post("/ingest", status_code=202)
     def ingest(body: IngestBody) -> dict:
         v = _resolve_vault(body.vault)
-        payload: dict = {"node_set": body.node_set} if body.node_set else {}
         # Kein Datei-Pfad-Zweig wie im CLI — HTTP-Clients liefern keine lokalen Pfade.
-        c = classify(body.content)
-        if c.kind == "youtube":
-            payload |= {"url": body.content.strip(), "video_id": c.video_id}
-        elif c.kind == "web":
-            payload |= {"url": body.content.strip()}
-        else:
-            payload |= {"text": body.content, "title": body.content[:50]}
+        kind, payload = build_payload(body.content)
+        if body.node_set:
+            payload["node_set"] = body.node_set
         # JobQueue pro Request — sqlite3-Verbindungen sind thread-gebunden.
         q = JobQueue(queue_path(v.instance))
-        jid = q.enqueue(v.name, c.kind, payload)
-        return {"job_id": jid, "vault": v.name, "kind": c.kind}
+        jid = q.enqueue(v.name, kind, payload)
+        return {"job_id": jid, "vault": v.name, "kind": kind}
 
     @api.post("/query")
     async def query(body: QueryBody) -> dict:

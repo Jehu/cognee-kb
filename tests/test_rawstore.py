@@ -27,3 +27,12 @@ def test_write_raw_avoids_collisions(tmp_path):
     p1, _ = write_raw(tmp_path, "Titel", "a", r1)
     p2, _ = write_raw(tmp_path, "Titel", "b", r2)
     assert p1 != p2
+
+
+def test_write_raw_collapses_multiline_title(tmp_path):
+    # Ein mehrzeiliger Titel darf die '# {title}'-H1 nicht zerbrechen.
+    r = SourceRecord.new(type="snippet", url=None, video_id=None, locator=None,
+                         vault="privat", raw_md_path="")
+    path, _ = write_raw(tmp_path, title="Zeile1\nZeile2\n# fremd", body="x", record=r)
+    h1_lines = [ln for ln in path.read_text().splitlines() if ln.startswith("# ")]
+    assert h1_lines == ["# Zeile1 Zeile2 # fremd"]

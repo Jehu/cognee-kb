@@ -151,3 +151,22 @@ async def test_run_forever_async_cancel_on_empty_queue(tmp_path):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_process_one_skips_duplicate_body(tmp_path):
+    # Gleicher Body im selben Vault -> zweiter Ingest wird übersprungen (mark_done).
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    j1 = q.enqueue("privat", "snippet", {"text": "Gleicher Inhalt.", "title": "A"})
+    j2 = q.enqueue("privat", "snippet", {"text": "Gleicher Inhalt.", "title": "B"})
+    ingest_mock = AsyncMock()
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.cognee_io.ingest", ingest_mock):
+        assert await process_one_async(instance=None, q=q, store=store) is True
+        assert await process_one_async(instance=None, q=q, store=store) is True
+    # Beide Jobs done, aber nur EINE Quelle/raw-Datei und nur EIN cognify.
+    assert q.status(j1) == "done" and q.status(j2) == "done"
+    assert store.conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
+    assert len(list((tmp_path / "raw").glob("*.md"))) == 1
+    assert ingest_mock.await_count == 1

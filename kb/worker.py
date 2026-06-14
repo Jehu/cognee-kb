@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -34,10 +35,19 @@ async def process_one_async(instance: Instance | None, q: JobQueue,
         vault = get_vault(job.vault)
         # _fetch ist blockierendes I/O (HTTP, Datei) — nicht den Loop blockieren
         doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
+        # Dedup: identischer Body im selben Vault wird nicht erneut ingestet
+        # (cognee dedupt intern per Hash, unsere raw-/Source-Schicht bisher nicht
+        # — sonst doppelte Quellen-Chips). mark_done, nicht failed: kein Fehler.
+        content_hash = hashlib.sha256(doc.body.encode("utf-8")).hexdigest()
+        if store.find_by_hash(content_hash, vault.name) is not None:
+            print(f"[worker] job {job.id}: Duplikat (gleicher Inhalt in "
+                  f"{vault.name}) — übersprungen", file=sys.stderr)
+            q.mark_done(job.id)
+            return True
         record = SourceRecord.new(
             type=job.kind, url=doc.url, video_id=doc.video_id,
             locator=doc.locator, vault=vault.name, raw_md_path="",
-            title=doc.title)
+            title=doc.title, content_hash=content_hash)
         path, record = rawstore.write_raw(vault.raw_dir, doc.title, doc.body, record)
         store.insert(record)
         # Stufe 1.5: node_set fällt per Default auf record.id zurück, damit jedes

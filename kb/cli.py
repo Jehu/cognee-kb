@@ -4,7 +4,7 @@ from pathlib import Path
 import typer
 
 from kb import cognee_io
-from kb.classify import classify
+from kb.classify import build_payload
 from kb.config import (
     ROOT,
     Instance,
@@ -84,20 +84,13 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
     except UnknownVaultError:
         typer.echo(f"Unbekannter Vault: {vault}", err=True)
         raise typer.Exit(1)
-    payload: dict = {"node_set": node_set} if node_set else {}
     p = Path(content).expanduser()
     if p.is_file():
-        kind = "file"
-        payload |= {"path": str(p.resolve())}
+        kind, payload = "file", {"path": str(p.resolve())}
     else:
-        c = classify(content)
-        kind = c.kind
-        if kind == "youtube":
-            payload |= {"url": content.strip(), "video_id": c.video_id}
-        elif kind == "web":
-            payload |= {"url": content.strip()}
-        else:
-            payload |= {"text": content, "title": content[:50]}
+        kind, payload = build_payload(content)
+    if node_set:
+        payload["node_set"] = node_set
     q = JobQueue(queue_path(v.instance))
     jid = q.enqueue(v.name, kind, payload)
     typer.echo(f"queued: job {jid} ({kind}) -> {v.name}")
