@@ -1,9 +1,39 @@
 import pytest
-from kb.config import get_vault, get_instance, UnknownVaultError, ConfigError, VAULTS
+from kb.config import (
+    CONFIG_FILE,
+    INSTANCES,
+    ConfigError,
+    UnknownVaultError,
+    VAULTS,
+    get_instance,
+    get_vault,
+)
 
 
-def test_vault_registry_complete():
-    assert set(VAULTS) == {"privat", "allgemein", "business-ki", "business-mwe"}
+def test_registry_matches_kb_toml():
+    # config lädt GENAU die in kb.toml deklarierten Vaults — aus der Datei
+    # abgeleitet, nicht hardcoded: bricht NICHT bei jeder Topologie-Änderung,
+    # fängt aber Parse-/Drop-Bugs in config._load.
+    import tomllib
+
+    declared = {v["name"] for v in tomllib.loads(CONFIG_FILE.read_text())["vaults"]}
+    assert set(VAULTS) == declared
+    assert VAULTS  # nicht leer
+
+
+def test_every_vault_maps_to_a_known_wall():
+    # Konsistenz-Invariante: jeder Vault gehört zu einer existierenden Wall.
+    for v in VAULTS.values():
+        assert v.instance in INSTANCES
+
+
+def test_vault_paths_follow_naming_convention():
+    # config.py leitet dataset + Rohpfad aus dem Namen ab (Konvention, nicht
+    # doppelt pflegen) — gilt für JEDEN Vault, unabhängig von den Namen.
+    for name, v in VAULTS.items():
+        assert v.name == name
+        assert v.dataset == name
+        assert v.raw_dir.name == name
 
 
 def test_privat_vault_maps_to_local_instance():

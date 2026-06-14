@@ -5,11 +5,17 @@ import httpx
 import pytest
 
 from kb import mcp_server
+from kb.config import INSTANCES, VAULTS, get_instance
 from kb.queue import JobQueue
 
 
 def _tool_names(server) -> set[str]:
     return {t.name for t in asyncio.run(server.list_tools())}
+
+
+def _vaults_of(instance: str):
+    # Registrierungs-Reihenfolge = kb.toml-Reihenfolge (VAULTS ist insertion-ordered).
+    return [v for v in VAULTS.values() if v.instance == instance]
 
 
 async def _call(server, name, **kwargs) -> str:
@@ -21,17 +27,24 @@ async def _call(server, name, **kwargs) -> str:
 
 # --- Tool-Registrierung pro Instanz ---
 
-def test_local_tools():
-    names = _tool_names(mcp_server.build_server("local"))
-    assert names == {"search_privat", "ingest", "job_status"}
-    assert "search_all" not in names  # nur ein Vault
+def test_tool_name_sanitizes_hyphens():
+    # MCP-Tool-Namen erlauben keine Bindestriche -> werden zu Unterstrichen.
+    assert mcp_server._tool_name("business-ki") == "search_business_ki"
+    assert mcp_server._tool_name("privat") == "search_privat"
 
 
-def test_cloud_tools():
-    names = _tool_names(mcp_server.build_server("cloud"))
-    assert names == {
-        "search_allgemein", "search_business_ki", "search_business_mwe",
-        "search_all", "ingest", "job_status"}
+def test_tools_registered_from_instance_vaults():
+    # Vertrag (aus der Config abgeleitet, nicht hardcoded): pro Vault der Instanz
+    # ein search_<vault>, dazu ingest + job_status, und search_all genau dann,
+    # wenn die Instanz mehr als einen Vault hat.
+    for inst_name in INSTANCES:
+        inst_vaults = _vaults_of(inst_name)
+        names = _tool_names(mcp_server.build_server(inst_name))
+        expected = {mcp_server._tool_name(v.name) for v in inst_vaults} | {"ingest", "job_status"}
+        if len(inst_vaults) > 1:
+            expected.add("search_all")
+        assert names == expected, inst_name
+        assert ("search_all" in names) == (len(inst_vaults) > 1)
 
 
 # --- Ingest ---
@@ -135,27 +148,37 @@ def _fake_async_client(response=None, exc=None, calls=None):
 # --- search-Proxy ---
 
 def test_search_calls_correct_port_and_dataset(monkeypatch):
+    # Port + Dataset aus der Config abgeleitet (irgendein Vault der cloud-Wall),
+    # nicht hardcoded.
+    cloud = get_instance("cloud")
+    vault = _vaults_of("cloud")[0]
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
-    answer = asyncio.run(_call(server, "search_business_mwe", question="Was ist X?"))
+    answer = asyncio.run(
+        _call(server, mcp_server._tool_name(vault.name), question="Was ist X?"))
     assert answer == "42"
     url, payload = calls[0]
-    assert url == "http://127.0.0.1:8802/query"
-    assert payload == {"question": "Was ist X?", "datasets": ["business-mwe"]}
+    assert url == f"http://127.0.0.1:{cloud.port}/query"
+    assert payload == {"question": "Was ist X?", "datasets": [vault.dataset]}
 
 
 def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
-    # business-ki ist NICHT der letzte Vault der Schleife — ein Late-Binding-Leak
-    # würde alle Tools auf business-mwe zeigen lassen und hier auffliegen.
+    # Der ERSTE Vault ist (bei >1) nicht der letzte der Registrierungs-Schleife —
+    # ein Late-Binding-Leak würde alle Tools auf den letzten Vault zeigen lassen
+    # und hier auffliegen. Vault dynamisch, daher robust gegen Topologie-Änderungen.
+    cloud_vaults = _vaults_of("cloud")
+    if len(cloud_vaults) < 2:
+        pytest.skip("cloud-Wall hat <2 Vaults — Late-Binding nicht testbar")
+    first = cloud_vaults[0]
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
-    asyncio.run(_call(server, "search_business_ki", question="Was ist X?"))
+    asyncio.run(_call(server, mcp_server._tool_name(first.name), question="Was ist X?"))
     _, payload = calls[0]
-    assert payload["datasets"] == ["business-ki"]
+    assert payload["datasets"] == [first.dataset]
 
 
 def test_search_200_without_answer_key_is_readable(monkeypatch):
@@ -176,13 +199,15 @@ def test_search_non_200_returns_status_message(monkeypatch):
 
 
 def test_search_all_uses_all_datasets(monkeypatch):
+    if len(_vaults_of("cloud")) < 2:
+        pytest.skip("cloud-Wall hat <2 Vaults — search_all existiert nicht")
     calls = []
     monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_all", question="Y?"))
     _, payload = calls[0]
-    assert set(payload["datasets"]) == {"allgemein", "business-ki", "business-mwe"}
+    assert set(payload["datasets"]) == {v.dataset for v in _vaults_of("cloud")}
 
 
 def test_search_instance_down_returns_readable_message(monkeypatch):
