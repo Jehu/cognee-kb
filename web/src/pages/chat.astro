@@ -68,7 +68,7 @@ import Base from '../layouts/Base.astro';
           } else {
             const label = document.createElement('span');
             label.className = 'sources-label';
-            label.textContent = 'Quellen';
+            label.textContent = 'verwandte Quellen';
             sec.appendChild(label);
             for (const src of sources) {
               const icon = TYPE_ICON[src.type] || '📄';
