@@ -3,6 +3,17 @@ __pycache__/
 .env.local
 .env.cloud
 .env.gateway
+
+# Daten, nicht Code — bewusst NICHT versioniert (separat sichern!).
+# .gitignore kennt keine Inline-Kommentare, daher Erklärung als eigene Zeilen:
+# var/ = cognee-Daten/Queues/Source-DBs (regenerierbar aus raw/)
+# raw/ = menschenlesbare Rohschicht = die eigentlichen KB-Inhalte
 var/
+raw/
+
 .pytest_cache/
 .DS_Store
+
+# Tool-Artefakte (Graphify) — kein Code
+graphify-out/
+.graphify_*
