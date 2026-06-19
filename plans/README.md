@@ -24,7 +24,7 @@ row when done.
 | 011  | Test all kb.toml validation branches | P2 | S | — | DONE |
 | 012  | Refresh vulnerable deps + audit gate | P2 | M | 001 | DONE |
 | 013  | Fix node-set autosuggest race | P3 | S | — | DONE |
-| 014  | Revoke object URL in openSourceRaw | P3 | S | — | TODO |
+| 014  | Revoke object URL in openSourceRaw | P3 | S | — | DONE |
 | 015  | Strip surrounding quotes in .env parsers | P3 | S | — | TODO |
 | 016  | Close SQLite connections on shutdown | P3 | S | — | TODO |
 | 017  | Remove stale CLAUDE.md name-drift note | P3 | S | — | TODO |
