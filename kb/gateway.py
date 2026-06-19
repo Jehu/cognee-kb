@@ -21,22 +21,15 @@ from kb.config import (
     VAULTS,
     UnknownVaultError,
     Vault,
-    get_instance,
     get_vault,
+    queue_path,
+    sources_path,
 )
 from kb.queue import JobQueue
+from kb.query_proxy import QueryProxyError, proxy_query
 from kb.sources import SourceStore
 
-QUERY_TIMEOUT = 120.0   # GRAPH_COMPLETION kann dauern
 HEALTH_TIMEOUT = 2.0
-
-
-def queue_path(instance_name: str) -> Path:
-    return get_instance(instance_name).var_dir / "queue.db"
-
-
-def sources_path(instance_name: str) -> Path:
-    return get_instance(instance_name).var_dir / "sources.db"
 
 
 def require_token(authorization: str | None = Header(default=None)) -> None:
@@ -94,23 +87,12 @@ def create_app() -> FastAPI:
     @api.post("/query")
     async def query(body: QueryBody) -> dict:
         v = _resolve_vault(body.vault)
-        inst = get_instance(v.instance)
         try:
-            async with httpx.AsyncClient(timeout=QUERY_TIMEOUT) as client:
-                r = await client.post(
-                    f"http://127.0.0.1:{inst.port}/query",
-                    json={"question": body.question, "datasets": [v.dataset]})
-        # TransportError deckt ConnectError, Timeouts, ReadError,
-        # RemoteProtocolError etc. ab (geprüfte Subklassen-Hierarchie).
-        except httpx.TransportError:
-            raise HTTPException(
-                502, f"Instance Service '{inst.name}' (Port {inst.port}) "
-                     "nicht erreichbar — läuft `kb serve-instance`?") from None
-        if r.status_code != 200:
-            raise HTTPException(
-                502, f"Instance Service '{inst.name}' antwortete mit {r.status_code}")
-        body = r.json()
-        return {"vault": v.name, "answer": body["answer"], "sources": body.get("sources", [])}
+            data = await proxy_query(v.instance, body.question, [v.dataset])
+        except QueryProxyError as e:
+            raise HTTPException(502, str(e)) from None
+        return {"vault": v.name, "answer": data["answer"],
+                "sources": data.get("sources", [])}
 
     @api.get("/source/{vault}/{source_id}/raw")
     def source_raw(vault: str, source_id: str):

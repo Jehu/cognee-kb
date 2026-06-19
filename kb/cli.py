@@ -14,6 +14,7 @@ from kb.config import (
     Vault,
     get_instance,
     get_vault,
+    queue_path,
 )
 from kb.queue import JobQueue
 from kb.sources import SourceStore
@@ -27,10 +28,6 @@ def _load(vault: str) -> tuple[Vault, Instance]:
     inst = get_instance(v.instance)
     cognee_io.load_instance_env(inst)
     return v, inst
-
-
-def queue_path(instance_name: str) -> Path:
-    return get_instance(instance_name).var_dir / "queue.db"
 
 
 @app.command()
