@@ -17,7 +17,7 @@ row when done.
 | 004  | Block SSRF in web-ingest | P1 | M | — | DONE |
 | 005  | Confine raw-source endpoint to raw_dir | P1 | S | — | DONE |
 | 006  | Serialize ingest polling | P2 | S | — | DONE |
-| 007  | Preserve query answer when CHUNKS fails | P2 | S | — | TODO |
+| 007  | Preserve query answer when CHUNKS fails | P2 | S | — | DONE |
 | 008  | Consolidate gateway/MCP/CLI helpers | P2 | M | 003 | TODO |
 | 009  | Harden PWA origin (CSP + headers + URL scheme) | P2 | S | — | TODO |
 | 010  | Add ruff + mypy | P2 | S–M | 001 | TODO |
