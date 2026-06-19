@@ -5,8 +5,12 @@ from kb.sources import SourceRecord, SourceStore
 
 def make_record(**over):
     base = dict(
-        type="youtube", url="https://youtu.be/abc12345678", video_id="abc12345678",
-        locator=None, vault="privat", raw_md_path="raw/privat/x.md",
+        type="youtube",
+        url="https://youtu.be/abc12345678",
+        video_id="abc12345678",
+        locator=None,
+        vault="privat",
+        raw_md_path="raw/privat/x.md",
     )
     base.update(over)
     return SourceRecord.new(**base)
@@ -14,7 +18,7 @@ def make_record(**over):
 
 def test_new_record_gets_id_and_fetched_at():
     r = make_record()
-    assert len(r.id) == 36          # uuid4
+    assert len(r.id) == 36  # uuid4
     assert r.fetched_at.endswith("Z")
 
 
@@ -65,8 +69,13 @@ def test_frontmatter_renders_all_fields():
     r = make_record(locator="00:12:30")
     fm = r.frontmatter()
     assert fm.startswith("---\n") and fm.rstrip().endswith("---")
-    for needle in ("source_id:", "type: youtube", "video_id: abc12345678",
-                   "locator: '00:12:30'", "vault: privat"):
+    for needle in (
+        "source_id:",
+        "type: youtube",
+        "video_id: abc12345678",
+        "locator: '00:12:30'",
+        "vault: privat",
+    ):
         assert needle in fm
 
 
@@ -82,7 +91,7 @@ def test_find_by_hash_is_vault_scoped(tmp_path):
     r = make_record(content_hash="h1", vault="privat")
     store.insert(r)
     assert store.find_by_hash("h1", "privat").id == r.id
-    assert store.find_by_hash("h1", "business-ki") is None   # anderer Vault -> kein Treffer
+    assert store.find_by_hash("h1", "business-ki") is None  # anderer Vault -> kein Treffer
     assert store.find_by_hash("unbekannt", "privat") is None
 
 

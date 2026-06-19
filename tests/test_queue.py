@@ -3,8 +3,9 @@ from kb.queue import JobQueue
 
 def test_enqueue_and_claim(tmp_path):
     q = JobQueue(tmp_path / "q.db")
-    job_id = q.enqueue(vault="privat", kind="youtube",
-                       payload={"url": "https://youtu.be/abc12345678"})
+    job_id = q.enqueue(
+        vault="privat", kind="youtube", payload={"url": "https://youtu.be/abc12345678"}
+    )
     job = q.claim_next()
     assert job.id == job_id
     assert job.kind == "youtube"

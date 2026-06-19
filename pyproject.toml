@@ -24,8 +24,11 @@ kb = "kb.cli:app"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.1.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.18",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [tool.uv]
@@ -40,3 +43,22 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "kb"
 module-root = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# BLE001 (broad-except) wird gezielt per noqa an den Worker-/Service-Stellen
+# erlaubt (Worker darf nie sterben). Konservative Selection, kein Stil-Dogma.
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# cognee ist lazily importiert und ungetypt; keine Stub-Noise propagieren.
+ignore_missing_imports = true
+files = ["kb"]

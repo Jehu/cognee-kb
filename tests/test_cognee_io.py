@@ -14,12 +14,13 @@ from kb.config import get_instance
 
 def test_load_instance_env_sets_vars(tmp_path, monkeypatch):
     env_file = tmp_path / ".env.test"
-    env_file.write_text('LLM_PROVIDER=ollama\n# Kommentar\nEMBEDDING_PROVIDER=fastembed\n')
+    env_file.write_text("LLM_PROVIDER=ollama\n# Kommentar\nEMBEDDING_PROVIDER=fastembed\n")
     inst = get_instance("local")
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
     load_instance_env(inst, env_path=env_file)
     import os
+
     assert os.environ["LLM_PROVIDER"] == "ollama"
     assert os.environ["EMBEDDING_PROVIDER"] == "fastembed"
 
@@ -114,7 +115,8 @@ def test_query_with_sources_returns_only_best_related_source(monkeypatch):
     monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
 
     answer, source_ids = asyncio.run(
-        query_with_sources(get_instance("local"), "Frage?", ["privat"]))
+        query_with_sources(get_instance("local"), "Frage?", ["privat"])
+    )
 
     assert answer == "Antwort"
     assert source_ids == [_UUID]
@@ -138,7 +140,8 @@ def test_query_with_sources_returns_answer_when_chunks_fails(monkeypatch):
     monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
 
     answer, source_ids = asyncio.run(
-        query_with_sources(get_instance("local"), "Frage?", ["privat"]))
+        query_with_sources(get_instance("local"), "Frage?", ["privat"])
+    )
     assert answer == "Antwort"
     assert source_ids == []
 

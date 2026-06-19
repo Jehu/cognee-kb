@@ -31,7 +31,7 @@ def _load(vault: str) -> tuple[Vault, Instance]:
 
 
 @app.command()
-def add(vault: str, path: Path):
+def add(vault: str, path: Path) -> None:
     """Phase 0: eine Datei direkt ingestieren (ohne Queue)."""
     v, inst = _load(vault)
     asyncio.run(cognee_io.ingest(inst, path, v.dataset, node_sets=[]))
@@ -39,7 +39,7 @@ def add(vault: str, path: Path):
 
 
 @app.command()
-def query(vault: str, question: str):
+def query(vault: str, question: str) -> None:
     """Stellt eine Frage an einen Vault (GRAPH_COMPLETION)."""
     v, inst = _load(vault)
     answer = asyncio.run(cognee_io.query(inst, question, datasets=[v.dataset]))
@@ -60,7 +60,7 @@ async def _answer_all(inst: Instance, fragen: list[str], datasets: list[str]) ->
 
 
 @app.command("eval")
-def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cognee.md"):
+def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cognee.md") -> None:
     """Beantwortet alle Fragen aus eval/fragen.md für den Blind-Vergleich."""
     v, inst = _load(vault)
     fragen = [
@@ -76,13 +76,13 @@ def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cogne
 
 
 @app.command()
-def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
+def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None:
     """Wirft Input in die Queue des zuständigen Workers."""
     try:
         v = get_vault(vault)
     except UnknownVaultError:
         typer.echo(f"Unbekannter Vault: {vault}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     p = Path(content).expanduser()
     if p.is_file():
         kind, payload = "file", {"path": str(p.resolve())}
@@ -96,7 +96,7 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)):
 
 
 @app.command()
-def worker(instance: str):
+def worker(instance: str) -> None:
     """Startet den seriellen Worker einer Instanz (local | cloud)."""
     from kb import worker as worker_mod
 
@@ -128,7 +128,7 @@ def _load_env_file(path: Path) -> None:
 
 
 @app.command("serve-instance")
-def serve_instance(instance: str):
+def serve_instance(instance: str) -> None:
     """Startet den Instance Service (local | cloud) auf 127.0.0.1."""
     # Lazy-Imports: instance_service zieht cognee — nur in diesem Befehl laden.
     import uvicorn
@@ -140,7 +140,7 @@ def serve_instance(instance: str):
 
 
 @app.command("serve-mcp")
-def serve_mcp(instance: str):
+def serve_mcp(instance: str) -> None:
     """Startet den stdio-MCP-Server einer Instanz (local | cloud)."""
     # Lazy-Import (wie worker/gateway) — mcp_server bleibt cognee-frei.
     from kb import mcp_server
@@ -150,7 +150,7 @@ def serve_mcp(instance: str):
 
 
 @app.command("serve-gateway")
-def serve_gateway():
+def serve_gateway() -> None:
     """Startet das Gateway (Auth, Enqueue, Query-Proxy, PWA) auf Port 8800."""
     import os
 
@@ -187,10 +187,10 @@ def _pids_on_port(port: int) -> list[int]:
 
     try:
         out = subprocess.run(
-            ["lsof", "-t", "-i", f"tcp:{port}", "-sTCP:LISTEN"],
-            capture_output=True, text=True).stdout
+            ["lsof", "-t", "-i", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True
+        ).stdout
     except FileNotFoundError:
-        raise typer.BadParameter("`lsof` nicht gefunden — `kb restart` benötigt lsof")
+        raise typer.BadParameter("`lsof` nicht gefunden — `kb restart` benötigt lsof") from None
     return [int(x) for x in out.split()]
 
 
@@ -203,7 +203,7 @@ def _restart_target(target: str) -> tuple[int, list[str], Path]:
 
 
 @app.command()
-def restart(target: str):
+def restart(target: str) -> None:
     """Stoppt den Prozess auf dem Port des Ziels und startet ihn frisch (detached).
 
     target: eine Wall (local | cloud) -> deren Instance Service,
@@ -227,7 +227,8 @@ def restart(target: str):
             port, argv, log = _restart_target(t)
         except KeyError:
             raise typer.BadParameter(
-                f"Unbekanntes Ziel {t!r} — erlaubt: {', '.join(INSTANCES)}, gateway, all")
+                f"Unbekanntes Ziel {t!r} — erlaubt: {', '.join(INSTANCES)}, gateway, all"
+            ) from None
 
         def _kill(pid: int, sig: int) -> None:
             try:
@@ -252,7 +253,8 @@ def restart(target: str):
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a") as f:
             proc = subprocess.Popen(
-                [str(kb_bin), *argv], stdout=f, stderr=f, start_new_session=True)
+                [str(kb_bin), *argv], stdout=f, stderr=f, start_new_session=True
+            )
 
         # 3. kurz auf Bereitschaft warten (Port wieder belegt)
         ready = False

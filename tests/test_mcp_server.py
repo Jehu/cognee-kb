@@ -8,6 +8,7 @@ from kb import mcp_server, query_proxy
 from kb.config import INSTANCES, VAULTS, get_instance
 from kb.queue import JobQueue
 
+
 def _tool_names(server) -> set[str]:
     return {t.name for t in asyncio.run(server.list_tools())}
 
@@ -25,6 +26,7 @@ async def _call(server, name, **kwargs) -> str:
 
 
 # --- Tool-Registrierung pro Instanz ---
+
 
 def test_tool_name_sanitizes_hyphens():
     # MCP-Tool-Namen erlauben keine Bindestriche -> werden zu Unterstrichen.
@@ -48,6 +50,7 @@ def test_tools_registered_from_instance_vaults():
 
 # --- Ingest ---
 
+
 def test_ingest_foreign_vault_no_enqueue(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
     server = mcp_server.build_server("local")
@@ -61,9 +64,15 @@ def test_ingest_foreign_vault_no_enqueue(tmp_path, monkeypatch):
 def test_ingest_valid_vault_enqueues(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
     server = mcp_server.build_server("local")
-    msg = asyncio.run(_call(
-        server, "ingest", vault="privat",
-        content="https://youtu.be/dQw4w9WgXcQ", node_set="musik"))
+    msg = asyncio.run(
+        _call(
+            server,
+            "ingest",
+            vault="privat",
+            content="https://youtu.be/dQw4w9WgXcQ",
+            node_set="musik",
+        )
+    )
     assert "queued job" in msg
     jid = int(msg.split()[2])
     info = JobQueue(tmp_path / "local.db").info(jid)
@@ -76,8 +85,7 @@ def test_ingest_valid_vault_enqueues(tmp_path, monkeypatch):
 def test_ingest_plain_text_snippet(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
     server = mcp_server.build_server("cloud")
-    msg = asyncio.run(_call(
-        server, "ingest", vault="business-ki", content="Nur ein Gedanke."))
+    msg = asyncio.run(_call(server, "ingest", vault="business-ki", content="Nur ein Gedanke."))
     assert "(snippet)" in msg
 
 
@@ -90,13 +98,18 @@ def test_ingest_snippet_uses_build_payload_title(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
     server = mcp_server.build_server("cloud")
-    content = ("# Mein Titel\n\n"
-               "Eine Zeile mit mehreren Worten die laenger als fuenfzig Zeichen "
-               "ist und so weiter und sofort.")
+    content = (
+        "# Mein Titel\n\n"
+        "Eine Zeile mit mehreren Worten die laenger als fuenfzig Zeichen "
+        "ist und so weiter und sofort."
+    )
     msg = asyncio.run(_call(server, "ingest", vault="business-ki", content=content))
     jid = int(msg.split()[2])
-    row = JobQueue(tmp_path / "cloud.db").conn.execute(
-        "SELECT payload FROM jobs WHERE id=?", (jid,)).fetchone()
+    row = (
+        JobQueue(tmp_path / "cloud.db")
+        .conn.execute("SELECT payload FROM jobs WHERE id=?", (jid,))
+        .fetchone()
+    )
     payload = json.loads(row[0])
     assert payload["title"] == snippet_title(content)
     assert payload["title"] != content[:50]
@@ -104,6 +117,7 @@ def test_ingest_snippet_uses_build_payload_title(tmp_path, monkeypatch):
 
 
 # --- job_status ---
+
 
 def test_job_status_foreign_vault(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
@@ -129,6 +143,7 @@ def test_job_status_unknown_job(tmp_path, monkeypatch):
 
 
 # --- Fake-httpx für search (respx ist nicht installiert) ---
+
 
 class _FakeResponse:
     def __init__(self, status_code=200, payload=None):
@@ -168,17 +183,18 @@ def _fake_async_client(response=None, exc=None, calls=None):
 
 # --- search-Proxy ---
 
+
 def test_search_calls_correct_port_and_dataset(monkeypatch):
     # Port + Dataset aus der Config abgeleitet (irgendein Vault der cloud-Wall),
     # nicht hardcoded.
     cloud = get_instance("cloud")
     vault = _vaults_of("cloud")[0]
     calls = []
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(), calls=calls))
+    monkeypatch.setattr(
+        query_proxy.httpx, "AsyncClient", _fake_async_client(response=_FakeResponse(), calls=calls)
+    )
     server = mcp_server.build_server("cloud")
-    answer = asyncio.run(
-        _call(server, mcp_server._tool_name(vault.name), question="Was ist X?"))
+    answer = asyncio.run(_call(server, mcp_server._tool_name(vault.name), question="Was ist X?"))
     assert answer == "42"
     url, payload = calls[0]
     assert url == f"http://127.0.0.1:{cloud.port}/query"
@@ -194,8 +210,9 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
         pytest.skip("cloud-Wall hat <2 Vaults — Late-Binding nicht testbar")
     first = cloud_vaults[0]
     calls = []
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(), calls=calls))
+    monkeypatch.setattr(
+        query_proxy.httpx, "AsyncClient", _fake_async_client(response=_FakeResponse(), calls=calls)
+    )
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, mcp_server._tool_name(first.name), question="Was ist X?"))
     _, payload = calls[0]
@@ -203,8 +220,11 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
 
 
 def test_search_200_without_answer_key_is_readable(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(payload={"error": "boom"})))
+    monkeypatch.setattr(
+        query_proxy.httpx,
+        "AsyncClient",
+        _fake_async_client(response=_FakeResponse(payload={"error": "boom"})),
+    )
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "keine Antwort" in msg
@@ -212,8 +232,11 @@ def test_search_200_without_answer_key_is_readable(monkeypatch):
 
 
 def test_search_non_200_returns_status_message(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(status_code=500)))
+    monkeypatch.setattr(
+        query_proxy.httpx,
+        "AsyncClient",
+        _fake_async_client(response=_FakeResponse(status_code=500)),
+    )
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "500" in msg
@@ -223,8 +246,9 @@ def test_search_all_uses_all_datasets(monkeypatch):
     if len(_vaults_of("cloud")) < 2:
         pytest.skip("cloud-Wall hat <2 Vaults — search_all existiert nicht")
     calls = []
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(), calls=calls))
+    monkeypatch.setattr(
+        query_proxy.httpx, "AsyncClient", _fake_async_client(response=_FakeResponse(), calls=calls)
+    )
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_all", question="Y?"))
     _, payload = calls[0]
@@ -232,8 +256,9 @@ def test_search_all_uses_all_datasets(monkeypatch):
 
 
 def test_search_instance_down_returns_readable_message(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _fake_async_client(exc=httpx.ConnectError("zu")))
+    monkeypatch.setattr(
+        query_proxy.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
+    )
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
     assert "nicht erreichbar" in msg
@@ -241,6 +266,7 @@ def test_search_instance_down_returns_readable_message(monkeypatch):
 
 
 # --- Privacy-Wand: kein cognee-Import ---
+
 
 def test_import_does_not_pull_cognee():
     # mcp_server ist bereits importiert (oben) — cognee darf nicht mitgekommen sein.

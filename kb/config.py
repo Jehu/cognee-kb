@@ -9,9 +9,9 @@ CONFIG_FILE = ROOT / "kb.toml"
 
 # Hart erzwungen, nicht über kb.toml konfigurierbar:
 EMBEDDING_PROVIDER = "fastembed"  # Wechsel würde alle bestehenden Vektoren invalidieren
-MODE_PROVIDERS = {                # Wall-mode -> erlaubte LLM-Provider (Guard-Whitelist)
-    "local": ("ollama",),         # zwingend lokal — kein Cloud-Call
-    "cloud": ("custom",),         # Cloud-LLM via OpenAI-kompatiblem Endpoint
+MODE_PROVIDERS = {  # Wall-mode -> erlaubte LLM-Provider (Guard-Whitelist)
+    "local": ("ollama",),  # zwingend lokal — kein Cloud-Call
+    "cloud": ("custom",),  # Cloud-LLM via OpenAI-kompatiblem Endpoint
 }
 
 
@@ -28,15 +28,15 @@ class Instance:
     name: str
     env_file: Path
     allowed_llm_providers: tuple[str, ...]  # Guard-Whitelist (aus Wall-mode abgeleitet)
-    expected_embedding_provider: str         # Guard hart: Wechsel invalidiert ALLE Vektoren
-    var_dir: Path                            # Queue-DB, Source-DB, Cognee-Roots
-    port: int                                # Instance Service (127.0.0.1)
+    expected_embedding_provider: str  # Guard hart: Wechsel invalidiert ALLE Vektoren
+    var_dir: Path  # Queue-DB, Source-DB, Cognee-Roots
+    port: int  # Instance Service (127.0.0.1)
 
 
 @dataclass(frozen=True)
 class Vault:
     name: str
-    instance: str   # Name der Wall, zu der dieser Vault gehört
+    instance: str  # Name der Wall, zu der dieser Vault gehört
     dataset: str
     raw_dir: Path
 
@@ -54,8 +54,7 @@ def _load(path: Path = CONFIG_FILE) -> tuple[dict[str, Instance], dict[str, Vaul
     for name, w in data.get("walls", {}).items():
         mode = w.get("mode")
         if mode not in MODE_PROVIDERS:
-            raise ConfigError(
-                f"Wall '{name}': mode={mode!r}, erlaubt {sorted(MODE_PROVIDERS)}")
+            raise ConfigError(f"Wall '{name}': mode={mode!r}, erlaubt {sorted(MODE_PROVIDERS)}")
         if "port" not in w:
             raise ConfigError(f"Wall '{name}': 'port' fehlt")
         instances[name] = Instance(
@@ -78,8 +77,7 @@ def _load(path: Path = CONFIG_FILE) -> tuple[dict[str, Instance], dict[str, Vaul
             raise ConfigError(f"Vault '{name}': unbekannte Wall '{wall}'")
         if name in vaults:
             raise ConfigError(f"Vault '{name}' doppelt definiert")
-        vaults[name] = Vault(name=name, instance=wall, dataset=name,
-                             raw_dir=ROOT / "raw" / name)
+        vaults[name] = Vault(name=name, instance=wall, dataset=name, raw_dir=ROOT / "raw" / name)
     if not vaults:
         raise ConfigError("kb.toml definiert keine Vaults ([[vaults]])")
 

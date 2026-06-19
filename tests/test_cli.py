@@ -7,8 +7,7 @@ runner = CliRunner()
 
 def test_ingest_enqueues_youtube(tmp_path, monkeypatch):
     monkeypatch.setattr("kb.cli.queue_path", lambda inst: tmp_path / f"{inst}.db")
-    result = runner.invoke(app, ["ingest", "privat",
-                                 "https://youtu.be/dQw4w9WgXcQ"])
+    result = runner.invoke(app, ["ingest", "privat", "https://youtu.be/dQw4w9WgXcQ"])
     assert result.exit_code == 0
     assert "queued" in result.output
     assert "youtube" in result.output
@@ -48,6 +47,7 @@ def test_serve_befehle_registriert():
 
 def test_restart_target_resolves_wall():
     from kb.cli import _restart_target
+
     port, argv, log = _restart_target("local")
     assert port == 8801
     assert argv == ["serve-instance", "local"]
@@ -56,6 +56,7 @@ def test_restart_target_resolves_wall():
 
 def test_restart_target_resolves_gateway():
     from kb.cli import _restart_target
+
     port, argv, _ = _restart_target("gateway")
     assert port == 8800
     assert argv == ["serve-gateway"]

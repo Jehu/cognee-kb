@@ -4,6 +4,17 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync
+      - run: uv run ruff check kb tests
+      - run: uv run ruff format --check kb tests
+      - run: uv run mypy kb
   test:
     runs-on: ubuntu-latest
     steps:

@@ -8,6 +8,7 @@ eine IP in einer gesperrten Range liegt (private/loopback/link-local/reserved/
 multicast/unspecified), wird der Request verweigert. Redirects werden vom
 Aufrufer per Hop erneut hier geprüft (siehe kb.fetch_web).
 """
+
 import ipaddress
 import socket
 from urllib.parse import urlparse
@@ -19,8 +20,12 @@ class UnsafeUrlError(ValueError):
 
 def _is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return (
-        ip.is_private or ip.is_loopback or ip.is_link_local
-        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
     )
 
 

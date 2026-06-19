@@ -22,6 +22,7 @@ class _OembedResponse:
 
 def test_video_title_uses_oembed(monkeypatch):
     from kb.fetch_youtube import _video_title
+
     monkeypatch.setattr("httpx.get", lambda *a, **k: _OembedResponse())
     assert _video_title("https://youtu.be/x", "vid123") == "Echtes Video — Titel"
 

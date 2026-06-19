@@ -10,8 +10,7 @@ from kb.worker import process_one, process_one_async, run_forever_async
 
 
 def make_vault(tmp_path) -> Vault:
-    return Vault(name="privat", instance="local", dataset="privat",
-                 raw_dir=tmp_path / "raw")
+    return Vault(name="privat", instance="local", dataset="privat", raw_dir=tmp_path / "raw")
 
 
 def test_process_one_snippet_full_chain(tmp_path):
@@ -19,8 +18,10 @@ def test_process_one_snippet_full_chain(tmp_path):
     store = SourceStore(tmp_path / "s.db")
     jid = q.enqueue("privat", "snippet", {"text": "Wichtiger Gedanke.", "title": "Notiz"})
     ingest_mock = AsyncMock()
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         worked = process_one(instance=None, q=q, store=store)
     assert worked is True
     # Rohdatei existiert und enthält Frontmatter + Text
@@ -28,8 +29,7 @@ def test_process_one_snippet_full_chain(tmp_path):
     assert len(files) == 1
     assert "Wichtiger Gedanke." in files[0].read_text()
     # Source-Record zeigt auf die Datei
-    row = store.conn.execute(
-        "SELECT raw_md_path, vault, type FROM sources").fetchone()
+    row = store.conn.execute("SELECT raw_md_path, vault, type FROM sources").fetchone()
     assert row is not None
     assert row[0] == str(files[0])
     assert row[1] == "privat"
@@ -46,8 +46,10 @@ def test_process_one_marks_failed_on_fetch_error(tmp_path):
     q = JobQueue(tmp_path / "q.db")
     store = SourceStore(tmp_path / "s.db")
     jid = q.enqueue("privat", "web", {"url": "https://example.com/down"})
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")),
+    ):
         worked = process_one(instance=None, q=q, store=store)
     assert worked is True
     assert q.status(jid) == "failed"
@@ -61,8 +63,10 @@ def test_process_one_reuses_given_loop(tmp_path):
     ingest_mock = AsyncMock()
     loop = asyncio.new_event_loop()
     try:
-        with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-             patch("kb.cognee_io.ingest", ingest_mock):
+        with (
+            patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+            patch("kb.cognee_io.ingest", ingest_mock),
+        ):
             assert process_one(instance=None, q=q, store=store, loop=loop) is True
             assert process_one(instance=None, q=q, store=store, loop=loop) is True
     finally:
@@ -85,8 +89,10 @@ async def test_process_one_async_snippet_full_chain(tmp_path):
     store = SourceStore(tmp_path / "s.db")
     jid = q.enqueue("privat", "snippet", {"text": "Asynchroner Gedanke.", "title": "Async"})
     ingest_mock = AsyncMock()
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         worked = await process_one_async(instance=None, q=q, store=store)
     assert worked is True
     files = list((tmp_path / "raw").glob("*.md"))
@@ -102,8 +108,10 @@ async def test_process_one_async_marks_failed_on_fetch_error(tmp_path):
     q = JobQueue(tmp_path / "q.db")
     store = SourceStore(tmp_path / "s.db")
     jid = q.enqueue("privat", "web", {"url": "https://example.com/down"})
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")),
+    ):
         worked = await process_one_async(instance=None, q=q, store=store)
     assert worked is True
     assert q.status(jid) == "failed"
@@ -122,10 +130,13 @@ async def test_run_forever_async_processes_jobs_and_stops_on_cancel(tmp_path):
     store = SourceStore(tmp_path / "s.db")
     jid = q.enqueue("privat", "snippet", {"text": "Service-Job.", "title": "Service"})
     ingest_mock = AsyncMock()
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         task = asyncio.create_task(
-            run_forever_async(instance=None, q=q, store=store, poll_seconds=0.01))
+            run_forever_async(instance=None, q=q, store=store, poll_seconds=0.01)
+        )
         # Warten, bis der Job verarbeitet ist (Schleife idlet danach im sleep)
         for _ in range(100):
             if q.status(jid) == "done":
@@ -144,8 +155,7 @@ async def test_run_forever_async_cancel_on_empty_queue(tmp_path):
     # Cancel muss auch im Idle-Sleep sauber durchschlagen
     q = JobQueue(tmp_path / "q.db")
     store = SourceStore(tmp_path / "s.db")
-    task = asyncio.create_task(
-        run_forever_async(instance=None, q=q, store=store, poll_seconds=5.0))
+    task = asyncio.create_task(run_forever_async(instance=None, q=q, store=store, poll_seconds=5.0))
     await asyncio.sleep(0.05)  # Schleife läuft an und hängt im sleep
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -161,8 +171,10 @@ async def test_process_one_skips_duplicate_body(tmp_path):
     j1 = q.enqueue("privat", "snippet", {"text": "Gleicher Inhalt.", "title": "A"})
     j2 = q.enqueue("privat", "snippet", {"text": "Gleicher Inhalt.", "title": "B"})
     ingest_mock = AsyncMock()
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         assert await process_one_async(instance=None, q=q, store=store) is True
         assert await process_one_async(instance=None, q=q, store=store) is True
     # Beide Jobs done, aber nur EINE Quelle/raw-Datei und nur EIN cognify.
@@ -186,8 +198,10 @@ async def test_process_one_cleans_up_on_ingest_failure_then_reingests(tmp_path):
     j1 = q.enqueue("privat", "snippet", {"text": text, "title": "Notiz"})
 
     failing = AsyncMock(side_effect=RuntimeError("ollama down"))
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", failing):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", failing),
+    ):
         worked = await process_one_async(instance=None, q=q, store=store)
     assert worked is True
     assert q.status(j1) == "failed"
@@ -200,8 +214,10 @@ async def test_process_one_cleans_up_on_ingest_failure_then_reingests(tmp_path):
     # Erneuter Ingest desselben Inhalts läuft wirklich neu (kein Dedup-Skip).
     j2 = q.enqueue("privat", "snippet", {"text": text, "title": "Notiz"})
     succeeding = AsyncMock()
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
-         patch("kb.cognee_io.ingest", succeeding):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", succeeding),
+    ):
         worked = await process_one_async(instance=None, q=q, store=store)
     assert worked is True
     assert q.status(j2) == "done"

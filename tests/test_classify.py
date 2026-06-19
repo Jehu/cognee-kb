@@ -1,16 +1,20 @@
 import pytest
+
 from kb.classify import build_payload, classify, snippet_title
 
 
-@pytest.mark.parametrize("inp,kind", [
-    ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"),
-    ("https://youtu.be/dQw4w9WgXcQ?t=42", "youtube"),
-    ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "youtube"),
-    ("https://example.com/artikel", "web"),
-    ("http://blog.fefe.de/?ts=99", "web"),
-    ("Nur ein Gedanke ohne Link.", "snippet"),
-    ("Text mit URL drin https://example.com aber Text dominiert", "snippet"),
-])
+@pytest.mark.parametrize(
+    "inp,kind",
+    [
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"),
+        ("https://youtu.be/dQw4w9WgXcQ?t=42", "youtube"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "youtube"),
+        ("https://example.com/artikel", "web"),
+        ("http://blog.fefe.de/?ts=99", "web"),
+        ("Nur ein Gedanke ohne Link.", "snippet"),
+        ("Text mit URL drin https://example.com aber Text dominiert", "snippet"),
+    ],
+)
 def test_classify(inp, kind):
     assert classify(inp).kind == kind
 
@@ -61,4 +65,4 @@ def test_build_payload_snippet_derives_clean_title():
     kind, p = build_payload("# Mein Titel\nInhalt hier")
     assert kind == "snippet"
     assert p["title"] == "Mein Titel"
-    assert p["text"] == "# Mein Titel\nInhalt hier"   # Body unverändert
+    assert p["text"] == "# Mein Titel\nInhalt hier"  # Body unverändert

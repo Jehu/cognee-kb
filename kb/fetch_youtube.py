@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -10,7 +11,7 @@ class FetchedDoc:
     locator: str | None = None
 
 
-def transcript_to_markdown(segments: list[dict]) -> str:
+def transcript_to_markdown(segments: list[dict[str, Any]]) -> str:
     lines = []
     for seg in segments:
         m, s = divmod(int(seg["start"]), 60)
@@ -25,12 +26,13 @@ def _video_title(url: str, video_id: str) -> str:
     import httpx
 
     try:
-        r = httpx.get("https://www.youtube.com/oembed",
-                      params={"url": url, "format": "json"}, timeout=10.0)
+        r = httpx.get(
+            "https://www.youtube.com/oembed", params={"url": url, "format": "json"}, timeout=10.0
+        )
         if r.status_code == 200:
             title = r.json().get("title")
             if title:
-                return title
+                return str(title)
     except Exception:  # noqa: BLE001 — Titel darf den Ingest nie scheitern lassen
         pass
     return f"YouTube {video_id}"

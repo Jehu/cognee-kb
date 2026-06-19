@@ -8,9 +8,14 @@ from kb.fetch_web import fetch
 
 
 def test_fetch_extracts_title_and_text():
-    html = "<html><head><title>Mein Artikel</title></head><body><article><p>Inhalt des Artikels.</p></article></body></html>"
-    with patch("kb.fetch_web.assert_safe_url"), \
-         patch("kb.fetch_web._fetch_following_redirects", return_value=html):
+    html = (
+        "<html><head><title>Mein Artikel</title></head>"
+        "<body><article><p>Inhalt des Artikels.</p></article></body></html>"
+    )
+    with (
+        patch("kb.fetch_web.assert_safe_url"),
+        patch("kb.fetch_web._fetch_following_redirects", return_value=html),
+    ):
         doc = fetch("https://example.com/artikel")
     assert doc.url == "https://example.com/artikel"
     assert "Inhalt des Artikels." in doc.body
@@ -18,8 +23,10 @@ def test_fetch_extracts_title_and_text():
 
 
 def test_fetch_raises_on_empty_page():
-    with patch("kb.fetch_web.assert_safe_url"), \
-         patch("kb.fetch_web._fetch_following_redirects", return_value=None):
+    with (
+        patch("kb.fetch_web.assert_safe_url"),
+        patch("kb.fetch_web._fetch_following_redirects", return_value=None),
+    ):
         with pytest.raises(RuntimeError, match="nicht laden"):
             fetch("https://example.com/down")
 

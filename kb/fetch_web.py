@@ -1,7 +1,7 @@
 import httpx
 import trafilatura
 
-from kb.fetch_safety import UnsafeUrlError, assert_safe_url
+from kb.fetch_safety import assert_safe_url
 from kb.fetch_youtube import FetchedDoc
 
 _MAX_HOPS = 3
@@ -21,7 +21,7 @@ def fetch(url: str) -> FetchedDoc:
     if not text:
         raise RuntimeError(f"Kein extrahierbarer Text auf {url}")
     meta = trafilatura.extract_metadata(html)
-    title = (meta.title if meta and meta.title else url)
+    title = meta.title if meta and meta.title else url
     return FetchedDoc(title=title, body=text, url=url)
 
 

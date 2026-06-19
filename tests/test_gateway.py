@@ -13,12 +13,12 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("KB_API_TOKEN", TOKEN)
-    monkeypatch.setattr("kb.gateway.queue_path",
-                        lambda inst: tmp_path / f"{inst}.db")
+    monkeypatch.setattr("kb.gateway.queue_path", lambda inst: tmp_path / f"{inst}.db")
     return TestClient(gateway.create_app())
 
 
 # --- Fake-httpx für den Query-Proxy (respx ist nicht installiert) ---
+
 
 class _FakeResponse:
     status_code = 200
@@ -29,6 +29,7 @@ class _FakeResponse:
 
 def _fake_async_client(response=None, exc=None, calls=None):
     """Baut einen httpx.AsyncClient-Ersatz, der post/get abfängt."""
+
     class FakeClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -56,14 +57,14 @@ def _fake_async_client(response=None, exc=None, calls=None):
 
 # --- Auth ---
 
+
 def test_requires_token(client):
     r = client.post("/api/ingest", json={"vault": "privat", "content": "x"})
     assert r.status_code == 401
 
 
 def test_rejects_wrong_token(client):
-    r = client.get("/api/vaults",
-                   headers={"Authorization": "Bearer falsch"})
+    r = client.get("/api/vaults", headers={"Authorization": "Bearer falsch"})
     assert r.status_code == 401
 
 
@@ -79,8 +80,9 @@ def test_security_headers_present(client):
 
 
 def test_health_needs_no_token(client, monkeypatch):
-    monkeypatch.setattr(gateway.httpx, "AsyncClient",
-                        _fake_async_client(exc=httpx.ConnectError("zu")))
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
+    )
     r = client.get("/api/health")
     assert r.status_code == 200
     body = r.json()
@@ -90,11 +92,13 @@ def test_health_needs_no_token(client, monkeypatch):
 
 # --- Ingest ---
 
+
 def test_ingest_enqueues_youtube(client, tmp_path):
-    r = client.post("/api/ingest", headers=AUTH, json={
-        "vault": "privat",
-        "content": "https://youtu.be/dQw4w9WgXcQ",
-        "node_set": "musik"})
+    r = client.post(
+        "/api/ingest",
+        headers=AUTH,
+        json={"vault": "privat", "content": "https://youtu.be/dQw4w9WgXcQ", "node_set": "musik"},
+    )
     assert r.status_code == 202
     body = r.json()
     assert body["vault"] == "privat"
@@ -107,27 +111,27 @@ def test_ingest_enqueues_youtube(client, tmp_path):
 
 
 def test_ingest_plain_text_stays_snippet(client):
-    r = client.post("/api/ingest", headers=AUTH, json={
-        "vault": "business-ki", "content": "Nur ein Gedanke."})
+    r = client.post(
+        "/api/ingest", headers=AUTH, json={"vault": "business-ki", "content": "Nur ein Gedanke."}
+    )
     assert r.status_code == 202
     assert r.json()["kind"] == "snippet"
 
 
 def test_ingest_unknown_vault(client):
-    r = client.post("/api/ingest", headers=AUTH, json={
-        "vault": "geheim", "content": "x"})
+    r = client.post("/api/ingest", headers=AUTH, json={"vault": "geheim", "content": "x"})
     assert r.status_code == 404
 
 
 def test_ingest_blank_content_rejected(client):
     # Leerer bzw. Nur-Whitespace-Content → Validierungsfehler
     for content in ("", "   \n\t "):
-        r = client.post("/api/ingest", headers=AUTH, json={
-            "vault": "privat", "content": content})
+        r = client.post("/api/ingest", headers=AUTH, json={"vault": "privat", "content": content})
         assert r.status_code == 422
 
 
 # --- Vaults + Jobs ---
+
 
 def test_vaults_lists_config(client):
     r = client.get("/api/vaults", headers=AUTH)
@@ -138,18 +142,21 @@ def test_vaults_lists_config(client):
 
 
 def test_node_sets_lists_existing_sets_for_vault(client):
-    client.post("/api/ingest", headers=AUTH, json={
-        "vault": "privat",
-        "content": "Notiz A",
-        "node_set": "projekt-a"})
-    client.post("/api/ingest", headers=AUTH, json={
-        "vault": "privat",
-        "content": "Notiz B",
-        "node_set": "projekt-b"})
-    client.post("/api/ingest", headers=AUTH, json={
-        "vault": "business-ki",
-        "content": "Notiz C",
-        "node_set": "fremd"})
+    client.post(
+        "/api/ingest",
+        headers=AUTH,
+        json={"vault": "privat", "content": "Notiz A", "node_set": "projekt-a"},
+    )
+    client.post(
+        "/api/ingest",
+        headers=AUTH,
+        json={"vault": "privat", "content": "Notiz B", "node_set": "projekt-b"},
+    )
+    client.post(
+        "/api/ingest",
+        headers=AUTH,
+        json={"vault": "business-ki", "content": "Notiz C", "node_set": "fremd"},
+    )
 
     r = client.get("/api/node-sets/privat", headers=AUTH)
 
@@ -163,8 +170,9 @@ def test_node_sets_requires_known_vault(client):
 
 
 def test_job_info_after_enqueue(client):
-    jid = client.post("/api/ingest", headers=AUTH, json={
-        "vault": "privat", "content": "Notiz"}).json()["job_id"]
+    jid = client.post(
+        "/api/ingest", headers=AUTH, json={"vault": "privat", "content": "Notiz"}
+    ).json()["job_id"]
     r = client.get(f"/api/jobs/privat/{jid}", headers=AUTH)
     assert r.status_code == 200
     body = r.json()
@@ -183,23 +191,26 @@ def test_job_info_unknown_job(client):
 def test_job_info_other_vault_is_404(client):
     # business-ki und business-mwe teilen eine queue.db — Job des einen
     # Vaults darf über den anderen NICHT abrufbar sein (Leak-Schutz).
-    jid = client.post("/api/ingest", headers=AUTH, json={
-        "vault": "business-ki", "content": "Notiz"}).json()["job_id"]
+    jid = client.post(
+        "/api/ingest", headers=AUTH, json={"vault": "business-ki", "content": "Notiz"}
+    ).json()["job_id"]
     r = client.get(f"/api/jobs/business-mwe/{jid}", headers=AUTH)
     assert r.status_code == 404
     # Über den richtigen Vault weiterhin sichtbar
-    assert client.get(f"/api/jobs/business-ki/{jid}",
-                      headers=AUTH).status_code == 200
+    assert client.get(f"/api/jobs/business-ki/{jid}", headers=AUTH).status_code == 200
 
 
 # --- Query-Proxy ---
 
+
 def test_query_proxies_to_instance(client, monkeypatch):
     calls = []
-    monkeypatch.setattr(gateway.httpx, "AsyncClient",
-                        _fake_async_client(response=_FakeResponse(), calls=calls))
-    r = client.post("/api/query", headers=AUTH, json={
-        "vault": "business-mwe", "question": "Was ist X?"})
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(response=_FakeResponse(), calls=calls)
+    )
+    r = client.post(
+        "/api/query", headers=AUTH, json={"vault": "business-mwe", "question": "Was ist X?"}
+    )
     assert r.status_code == 200
     assert r.json() == {"vault": "business-mwe", "answer": "42", "sources": []}
     # Richtige Instanz (cloud → 8802) + Dataset des Vaults
@@ -209,53 +220,57 @@ def test_query_proxies_to_instance(client, monkeypatch):
 
 
 def test_query_instance_down_returns_502(client, monkeypatch):
-    monkeypatch.setattr(gateway.httpx, "AsyncClient",
-                        _fake_async_client(exc=httpx.ConnectError("zu")))
-    r = client.post("/api/query", headers=AUTH, json={
-        "vault": "privat", "question": "Hallo?"})
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
+    )
+    r = client.post("/api/query", headers=AUTH, json={"vault": "privat", "question": "Hallo?"})
     assert r.status_code == 502
     assert "nicht erreichbar" in r.json()["detail"]
 
 
 def test_query_read_error_returns_502(client, monkeypatch):
     # TransportError-Subklassen jenseits von ConnectError/Timeout
-    monkeypatch.setattr(gateway.httpx, "AsyncClient",
-                        _fake_async_client(exc=httpx.ReadError("abgebrochen")))
-    r = client.post("/api/query", headers=AUTH, json={
-        "vault": "privat", "question": "Hallo?"})
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ReadError("abgebrochen"))
+    )
+    r = client.post("/api/query", headers=AUTH, json={"vault": "privat", "question": "Hallo?"})
     assert r.status_code == 502
 
 
 def test_query_unknown_vault(client):
-    r = client.post("/api/query", headers=AUTH, json={
-        "vault": "geheim", "question": "x"})
+    r = client.post("/api/query", headers=AUTH, json={"vault": "geheim", "question": "x"})
     assert r.status_code == 404
 
 
 # --- Raw-Source-Endpoint ---
 
+
 @pytest.fixture
 def source_client(tmp_path, monkeypatch):
     """Client mit gepatchtem sources_path und raw_dir (business-mwe → cloud-Instanz)."""
     monkeypatch.setenv("KB_API_TOKEN", TOKEN)
-    monkeypatch.setattr("kb.gateway.queue_path",
-                        lambda inst: tmp_path / f"{inst}.db")
-    monkeypatch.setattr("kb.gateway.sources_path",
-                        lambda inst: tmp_path / f"{inst}_sources.db")
+    monkeypatch.setattr("kb.gateway.queue_path", lambda inst: tmp_path / f"{inst}.db")
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
     # raw_dir auf tmp umleiten, damit der Confinement-Check echte Pfade nutzt.
-    from kb.config import Vault, get_vault as _real_get_vault
+    from kb.config import Vault
+    from kb.config import get_vault as _real_get_vault
 
     def _fake_get_vault(name):
         real = _real_get_vault(name)
-        return Vault(name=real.name, instance=real.instance,
-                     dataset=real.dataset, raw_dir=tmp_path / "raw" / name)
+        return Vault(
+            name=real.name,
+            instance=real.instance,
+            dataset=real.dataset,
+            raw_dir=tmp_path / "raw" / name,
+        )
 
     monkeypatch.setattr("kb.gateway.get_vault", _fake_get_vault)
     return TestClient(gateway.create_app())
 
 
-def _insert_source_record(tmp_path, source_id: str, vault: str,
-                          raw_md_path: str, instance: str = "cloud") -> None:
+def _insert_source_record(
+    tmp_path, source_id: str, vault: str, raw_md_path: str, instance: str = "cloud"
+) -> None:
     """Hilfsfunktion: Record in die gemockte sources.db einfügen."""
     store = SourceStore(tmp_path / f"{instance}_sources.db")
     rec = SourceRecord(
@@ -310,8 +325,7 @@ def test_source_raw_missing_file_returns_404(source_client, tmp_path):
     # Record existiert, Pfad liegt unter raw_dir, aber die Datei fehlt auf Platte.
     raw_dir = tmp_path / "raw" / "business-mwe"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    _insert_source_record(tmp_path, "src4", "business-mwe",
-                          str(raw_dir / "weg.md"))
+    _insert_source_record(tmp_path, "src4", "business-mwe", str(raw_dir / "weg.md"))
     r = source_client.get("/api/source/business-mwe/src4/raw", headers=AUTH)
     assert r.status_code == 404
 
