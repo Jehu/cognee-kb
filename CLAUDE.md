@@ -113,9 +113,8 @@ gitignored. `raw/<vault>/` hält die versionierbare Markdown-Rohschicht mit
 YAML-Frontmatter (`sources.py` quotet Strings mit Doppelpunkt bewusst — nicht zu
 `safe_dump` vereinfachen).
 
-> **Hinweis:** Walls heißen im Code `local`/`cloud`. Das README nennt an einigen
-> Stellen noch ältere Namen (`privat`/`business`, `.env.privat`) — `kb.toml` und
-> `config.py` sind maßgeblich.
+> **Hinweis:** Walls heißen `local`/`cloud`; `kb.toml` und `config.py` sind
+> maßgeblich für die Topologie. README und Code nutzen dieselben Namen.
 
 ## Konventionen
 
