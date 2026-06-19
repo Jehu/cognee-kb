@@ -15,6 +15,14 @@ cp .env.local.template .env.local      # anpassen (Ollama)
 cp .env.cloud.template .env.cloud      # API-Key eintragen (Cloud-LLM)
 ```
 
+## Tests
+
+```sh
+uv run pytest              # Python-Backend
+cd web && npm test         # PWA (node --test)
+make test                  # beides zusammen
+```
+
 ## CLI
 
 ```sh

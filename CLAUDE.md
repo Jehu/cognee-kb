@@ -28,6 +28,7 @@ uv run kb serve-gateway                    # Gateway + PWA (0.0.0.0:8800)
 uv run kb serve-mcp <instance>             # stdio-MCP-Server der Instanz
 
 cd web && npm install && npm run build     # PWA bauen → web/dist/ (vom Gateway ausgeliefert)
+cd web && npm test                    # PWA-Tests (node --test)
 ```
 
 Es gibt keine Lint-Konfiguration und keine `[tool.pytest]`-Section; pytest läuft
