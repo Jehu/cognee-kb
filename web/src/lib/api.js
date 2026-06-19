@@ -99,9 +99,18 @@ export async function openSourceRaw(vault, sourceId) {
   if (res.status === 401) { alert('Nicht autorisiert — Token in Einstellungen prüfen.'); return; }
   if (res.status === 404) { alert('Quelle nicht gefunden.'); return; }
   if (!res.ok) { alert(`Fehler ${res.status} beim Laden der Quelle.`); return; }
-  const blob = await res.blob();
+  openBlobInNewTab(await res.blob());
+}
+
+// Öffnet einen Blob in einem neuen Tab und gibt die Object-URL nach kurzem
+// Timeout frei (sonst Leak über lange Sessions). Erkennt blockierte Popups
+// (iOS Safari außerhalb einer User-Gesture) und meldet sich statt stumm zu
+// scheitern — extrahiert, damit es ohne DOM testbar ist.
+export function openBlobInNewTab(blob) {
   const u = URL.createObjectURL(blob);
-  window.open(u, '_blank');
+  const win = window.open(u, '_blank');
+  setTimeout(() => URL.revokeObjectURL(u), 60_000);
+  if (!win) alert('Popup wurde blockiert — bitte Popups für diese Seite erlauben.');
 }
 
 // <select> mit Vaults befüllen, Standard-Vault vorauswählen.
