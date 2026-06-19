@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from kb.classify import classify
+from kb.classify import build_payload
 from kb.config import VAULTS, get_instance
 from kb.queue import JobQueue
 
@@ -92,18 +92,15 @@ def build_server(instance_name: str):
         if vault not in vault_names:
             return (f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
                     f"Erlaubt: {', '.join(sorted(vault_names))}")
-        payload: dict = {"node_set": node_set} if node_set else {}
-        # Kein Datei-Pfad-Zweig (wie Gateway) — youtube/web/snippet.
-        c = classify(content)
-        if c.kind == "youtube":
-            payload |= {"url": content.strip(), "video_id": c.video_id}
-        elif c.kind == "web":
-            payload |= {"url": content.strip()}
-        else:
-            payload |= {"text": content, "title": content[:50]}
+        # Payload wie Gateway/CLI über build_payload ableiten (eine Stelle für
+        # die Snippet-Titel-Logik) — vermeidet die frühere Titel-Divergenz,
+        # bei der der Titel roh abgeschnitten statt via snippet_title() gebaut wurde.
+        kind, payload = build_payload(content)
+        if node_set:
+            payload["node_set"] = node_set
         q = JobQueue(queue_path(instance_name))
-        jid = q.enqueue(vault, c.kind, payload)
-        return f"queued job {jid} ({c.kind}) -> {vault}"
+        jid = q.enqueue(vault, kind, payload)
+        return f"queued job {jid} ({kind}) -> {vault}"
 
     mcp.add_tool(
         ingest, name="ingest",
