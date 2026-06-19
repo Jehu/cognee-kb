@@ -25,6 +25,38 @@ def test_load_instance_env_sets_vars(tmp_path, monkeypatch):
     assert os.environ["EMBEDDING_PROVIDER"] == "fastembed"
 
 
+def test_load_instance_env_strips_surrounding_quotes(tmp_path, monkeypatch):
+    # dotenv-Konvention: umschließende " oder ' werden entfernt — sonst bekäme
+    # cognee z. B. '"sk-..."' als Key (mit Literal-Quotes) -> stummer Auth-Fehler.
+    import os
+
+    env_file = tmp_path / ".env.test"
+    env_file.write_text(
+        "LLM_PROVIDER=custom\n"
+        'LLM_API_KEY="sk-geheim"\n'
+        "LLM_MODEL='qwen3'\n"
+        "EMBEDDING_PROVIDER=fastembed\n"
+        "LLM_ENDPOINT=http://x\n"  # ohne Quotes bleibt unangetastet
+    )
+    inst = get_instance("cloud")
+    for k in ("LLM_API_KEY", "LLM_MODEL", "EMBEDDING_PROVIDER", "LLM_ENDPOINT", "LLM_PROVIDER"):
+        monkeypatch.delenv(k, raising=False)
+    load_instance_env(inst, env_path=env_file)
+    assert os.environ["LLM_API_KEY"] == "sk-geheim"
+    assert os.environ["LLM_MODEL"] == "qwen3"
+    assert os.environ["LLM_ENDPOINT"] == "http://x"
+
+
+def test_strip_quotes_unit():
+    from kb.envutil import strip_quotes
+
+    assert strip_quotes('"sk-x"') == "sk-x"
+    assert strip_quotes("'qwen'") == "qwen"
+    assert strip_quotes("plain") == "plain"
+    assert strip_quotes('a"b') == 'a"b'  # ungepaart -> unangetastet
+    assert strip_quotes('""') == ""
+
+
 class _StubSearchResult:
     """Nachbau von cognee SearchResult — nur das Feld, das _render nutzt."""
 
