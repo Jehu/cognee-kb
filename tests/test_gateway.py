@@ -225,12 +225,21 @@ def test_query_unknown_vault(client):
 
 @pytest.fixture
 def source_client(tmp_path, monkeypatch):
-    """Client mit gepatchtem sources_path (business-mwe → cloud-Instanz)."""
+    """Client mit gepatchtem sources_path und raw_dir (business-mwe → cloud-Instanz)."""
     monkeypatch.setenv("KB_API_TOKEN", TOKEN)
     monkeypatch.setattr("kb.gateway.queue_path",
                         lambda inst: tmp_path / f"{inst}.db")
     monkeypatch.setattr("kb.gateway.sources_path",
                         lambda inst: tmp_path / f"{inst}_sources.db")
+    # raw_dir auf tmp umleiten, damit der Confinement-Check echte Pfade nutzt.
+    from kb.config import Vault, get_vault as _real_get_vault
+
+    def _fake_get_vault(name):
+        real = _real_get_vault(name)
+        return Vault(name=real.name, instance=real.instance,
+                     dataset=real.dataset, raw_dir=tmp_path / "raw" / name)
+
+    monkeypatch.setattr("kb.gateway.get_vault", _fake_get_vault)
     return TestClient(gateway.create_app())
 
 
@@ -253,8 +262,10 @@ def _insert_source_record(tmp_path, source_id: str, vault: str,
 
 
 def test_source_raw_returns_markdown(source_client, tmp_path):
-    # Markdown-Datei anlegen
-    md = tmp_path / "x.md"
+    # Datei liegt UNTER raw_dir — Confinement lässt sie durch.
+    raw_dir = tmp_path / "raw" / "business-mwe"
+    raw_dir.mkdir(parents=True)
+    md = raw_dir / "x.md"
     md.write_text("# Hallo\nInhalt hier.")
     _insert_source_record(tmp_path, "src1", "business-mwe", str(md))
     r = source_client.get("/api/source/business-mwe/src1/raw", headers=AUTH)
@@ -285,8 +296,20 @@ def test_source_raw_cross_vault_blocked(source_client, tmp_path):
 
 
 def test_source_raw_missing_file_returns_404(source_client, tmp_path):
-    # Record existiert, Datei aber nicht mehr auf der Platte
+    # Record existiert, Pfad liegt unter raw_dir, aber die Datei fehlt auf Platte.
+    raw_dir = tmp_path / "raw" / "business-mwe"
+    raw_dir.mkdir(parents=True, exist_ok=True)
     _insert_source_record(tmp_path, "src4", "business-mwe",
-                          str(tmp_path / "weg.md"))
+                          str(raw_dir / "weg.md"))
     r = source_client.get("/api/source/business-mwe/src4/raw", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_source_raw_rejects_path_outside_raw_dir(source_client, tmp_path):
+    # Datei existiert, liegt aber AUSSERHALB von raw_dir -> Confinement -> 404
+    # (beweist, dass der 404 vom Confinement kommt, nicht vom fehlenden File).
+    outside = tmp_path / "secret.md"
+    outside.write_text("soll nicht ausgeliefert werden")
+    _insert_source_record(tmp_path, "src5", "business-mwe", str(outside))
+    r = source_client.get("/api/source/business-mwe/src5/raw", headers=AUTH)
     assert r.status_code == 404

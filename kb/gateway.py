@@ -123,7 +123,14 @@ def create_app() -> FastAPI:
         # (Vaults einer Instanz teilen sich die sources.db).
         if rec is None or rec.vault != v.name:
             raise HTTPException(404, "Unbekannte Quelle")
-        p = Path(rec.raw_md_path)
+        # Confinement gegen Pfad-Traversal: raw_md_path kommt als Freitext aus
+        # der DB und darf nie außerhalb von raw_dir zeigen — sonst genügt ein
+        # Schreiber (oder DB-Edit), der von slugify abweicht, für einen
+        # authentifizierten Arbitrary-File-Read (.env.gateway, cognee-Daten, …).
+        raw_dir = v.raw_dir.resolve()
+        p = Path(rec.raw_md_path).resolve()
+        if raw_dir != p.parent and raw_dir not in p.parents:
+            raise HTTPException(404, "Unbekannte Quelle")
         if not p.is_file():
             raise HTTPException(404, "Rohdatei nicht gefunden")
         return FileResponse(p, media_type="text/markdown")

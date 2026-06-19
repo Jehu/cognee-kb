@@ -15,7 +15,7 @@ row when done.
 | 002  | Fix ghost source record on ingest failure | P1 | S | 001 | DONE |
 | 003  | Fix MCP snippet-title divergence | P1 | S | — | DONE |
 | 004  | Block SSRF in web-ingest | P1 | M | — | DONE |
-| 005  | Confine raw-source endpoint to raw_dir | P1 | S | — | TODO |
+| 005  | Confine raw-source endpoint to raw_dir | P1 | S | — | DONE |
 | 006  | Serialize ingest polling | P2 | S | — | TODO |
 | 007  | Preserve query answer when CHUNKS fails | P2 | S | — | TODO |
 | 008  | Consolidate gateway/MCP/CLI helpers | P2 | M | 003 | TODO |
