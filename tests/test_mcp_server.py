@@ -82,6 +82,28 @@ def test_ingest_plain_text_snippet(tmp_path, monkeypatch):
     assert "(snippet)" in msg
 
 
+def test_ingest_snippet_uses_build_payload_title(tmp_path, monkeypatch):
+    # Snippet-Titel via snippet_title() (wie Gateway/CLI), NICHT content[:50]
+    # — das wäre mitten im Wort/mehrzeilig und würde die Raw-H1 zerbrechen.
+    import json
+
+    from kb.classify import snippet_title
+
+    monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / f"{inst}.db")
+    server = mcp_server.build_server("cloud")
+    content = ("# Mein Titel\n\n"
+               "Eine Zeile mit mehreren Worten die laenger als fuenfzig Zeichen "
+               "ist und so weiter und sofort.")
+    msg = asyncio.run(_call(server, "ingest", vault="business-ki", content=content))
+    jid = int(msg.split()[2])
+    row = JobQueue(tmp_path / "cloud.db").conn.execute(
+        "SELECT payload FROM jobs WHERE id=?", (jid,)).fetchone()
+    payload = json.loads(row[0])
+    assert payload["title"] == snippet_title(content)
+    assert payload["title"] != content[:50]
+    assert payload["title"] == "Mein Titel"
+
+
 # --- job_status ---
 
 def test_job_status_foreign_vault(tmp_path, monkeypatch):
