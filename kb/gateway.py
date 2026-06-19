@@ -143,6 +143,12 @@ def create_app() -> FastAPI:
     def vaults() -> list[dict]:
         return [{"name": v.name, "instance": v.instance} for v in VAULTS.values()]
 
+    @api.get("/node-sets/{vault}")
+    def node_sets(vault: str) -> dict:
+        v = _resolve_vault(vault)
+        q = JobQueue(queue_path(v.instance))
+        return {"vault": v.name, "node_sets": q.node_sets(v.name)}
+
     app.include_router(api)
 
     @app.get("/api/health")  # bewusst ohne Token (Monitoring)

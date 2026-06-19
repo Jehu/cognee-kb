@@ -35,3 +35,13 @@ def test_recover_stale_requeues_running_jobs(tmp_path):
     again = q.claim_next()
     assert again is not None
     assert again.id == job_id
+
+
+def test_node_sets_lists_unique_explicit_sets_for_vault(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    q.enqueue("privat", "snippet", {"text": "a", "node_set": "projekt-a"})
+    q.enqueue("privat", "snippet", {"text": "b", "node_set": ["projekt-b", "projekt-a"]})
+    q.enqueue("privat", "snippet", {"text": "c"})
+    q.enqueue("business-ki", "snippet", {"text": "d", "node_set": "fremd"})
+
+    assert q.node_sets("privat") == ["projekt-a", "projekt-b"]

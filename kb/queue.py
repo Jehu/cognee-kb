@@ -85,3 +85,16 @@ class JobQueue:
                 "SELECT status, COUNT(*) FROM jobs GROUP BY status"):
             result[status] = n
         return result
+
+    def node_sets(self, vault: str) -> list[str]:
+        """Explizit gesetzte node_set-Werte eines Vaults für UI-Vorschläge."""
+        result: set[str] = set()
+        for (payload_raw,) in self.conn.execute(
+                "SELECT payload FROM jobs WHERE vault=?", (vault,)):
+            payload = json.loads(payload_raw)
+            value = payload.get("node_set")
+            if isinstance(value, str) and value.strip():
+                result.add(value.strip())
+            elif isinstance(value, list):
+                result.update(v.strip() for v in value if isinstance(v, str) and v.strip())
+        return sorted(result)

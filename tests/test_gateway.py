@@ -126,6 +126,31 @@ def test_vaults_lists_config(client):
     assert names["business-ki"] == "cloud"
 
 
+def test_node_sets_lists_existing_sets_for_vault(client):
+    client.post("/api/ingest", headers=AUTH, json={
+        "vault": "privat",
+        "content": "Notiz A",
+        "node_set": "projekt-a"})
+    client.post("/api/ingest", headers=AUTH, json={
+        "vault": "privat",
+        "content": "Notiz B",
+        "node_set": "projekt-b"})
+    client.post("/api/ingest", headers=AUTH, json={
+        "vault": "business-ki",
+        "content": "Notiz C",
+        "node_set": "fremd"})
+
+    r = client.get("/api/node-sets/privat", headers=AUTH)
+
+    assert r.status_code == 200
+    assert r.json() == {"vault": "privat", "node_sets": ["projekt-a", "projekt-b"]}
+
+
+def test_node_sets_requires_known_vault(client):
+    r = client.get("/api/node-sets/geheim", headers=AUTH)
+    assert r.status_code == 404
+
+
 def test_job_info_after_enqueue(client):
     jid = client.post("/api/ingest", headers=AUTH, json={
         "vault": "privat", "content": "Notiz"}).json()["job_id"]
