@@ -2,38 +2,132 @@
 import Base from '../layouts/Base.astro';
 ---
 <Base title="Ingest">
-  <h1>Ingest</h1>
+  <section class="page-intro">
+    <h1>Ingest</h1>
+    <p>Quelle, Link oder Notiz erfassen. Die Verarbeitung läuft im Hintergrund.</p>
+  </section>
   <form id="ingest-form">
     <label for="vault">Vault</label>
     <select id="vault"></select>
+    <div id="vault-context" class="meta-row"></div>
 
-    <label for="content">URL oder Text</label>
-    <textarea id="content" placeholder="https://… oder Notiztext" required></textarea>
+    <label for="content">Quelle oder Notiz</label>
+    <textarea id="content" placeholder="Link einfügen oder Notiz schreiben" required autofocus></textarea>
 
-    <label for="node_set">Node-Set (optional)</label>
-    <input id="node_set" type="text" placeholder="z. B. projekte" autocapitalize="off" autocomplete="off" />
+    <details class="advanced-fields">
+      <summary>Metadaten</summary>
+      <label for="node_set">Node-Set</label>
+      <input id="node_set" type="text" list="node-set-suggestions" placeholder="z. B. projekte" autocapitalize="off" autocomplete="off" />
+      <datalist id="node-set-suggestions"></datalist>
+      <p class="field-hint">Tippen oder ein vorhandenes Node-Set aus diesem Vault auswählen.</p>
+    </details>
 
-    <button type="submit" id="submit" disabled>Senden</button>
+    <button type="submit" id="submit" disabled>Quelle speichern</button>
   </form>
   <div id="result" class="status hidden"></div>
+  <ol id="job-steps" class="job-steps hidden" aria-live="polite">
+    <li data-step="accepted">Angenommen</li>
+    <li data-step="running">Verarbeitung</li>
+    <li data-step="done">Fertig</li>
+  </ol>
 
   <script>
-    import { api, initVaultSelect } from '../lib/api.js';
+    import { api, initVaultSelect, loadNodeSets } from '../lib/api.js';
 
     const form = document.getElementById('ingest-form');
     const vaultSel = document.getElementById('vault');
+    const vaultContext = document.getElementById('vault-context');
+    const nodeSetSuggestions = document.getElementById('node-set-suggestions');
     const result = document.getElementById('result');
+    const jobSteps = document.getElementById('job-steps');
     const submit = document.getElementById('submit');
+    let vaultReady = false;
+    let vaultState = null;
 
     // Submit erst freigeben, wenn die Vault-Auswahl befüllt ist —
     // sonst ginge ein Submit mit leerem Vault raus.
-    initVaultSelect(vaultSel).finally(() => {
-      submit.disabled = false;
+    initVaultSelect(vaultSel).then((state) => {
+      vaultState = state;
+      vaultReady = state.ok;
+      submit.disabled = !state.ok;
+      renderVaultContext();
+      if (state.ok) refreshNodeSetSuggestions();
+      if (!state.ok) showAuthRequired();
+    });
+
+    vaultSel.addEventListener('change', () => {
+      renderVaultContext();
+      refreshNodeSetSuggestions();
+    });
+
+    document.getElementById('content').addEventListener('input', (ev) => {
+      const value = ev.target.value.trim();
+      submit.textContent = value.startsWith('http://') || value.startsWith('https://')
+        ? 'Link speichern'
+        : 'Quelle speichern';
     });
 
     function show(text, cls = '') {
       result.className = `status ${cls}`.trim();
       result.textContent = text;
+    }
+
+    function currentVault() {
+      return (vaultState?.vaults || []).find((vault) => vault.name === vaultSel.value);
+    }
+
+    function renderVaultContext() {
+      vaultContext.replaceChildren();
+      const vault = currentVault();
+      if (!vault?.instance) return;
+      vaultContext.append(
+        document.createTextNode('Wall '),
+        Object.assign(document.createElement('span'), {
+          className: `wall-badge ${vault.instance}`,
+          textContent: vault.instance,
+        }),
+      );
+    }
+
+    async function refreshNodeSetSuggestions() {
+      nodeSetSuggestions.replaceChildren();
+      if (!vaultSel.value) return;
+      try {
+        const nodeSets = await loadNodeSets(vaultSel.value);
+        for (const nodeSet of nodeSets) {
+          const option = document.createElement('option');
+          option.value = nodeSet;
+          nodeSetSuggestions.appendChild(option);
+        }
+      } catch {
+        // Vorschläge sind Komfort; Ingest darf ohne sie weiter funktionieren.
+      }
+    }
+
+    function setStep(status) {
+      jobSteps.classList.remove('hidden');
+      for (const item of jobSteps.querySelectorAll('li')) item.className = '';
+      if (status === 'accepted') jobSteps.querySelector('[data-step="accepted"]').className = 'active';
+      if (status === 'running') {
+        jobSteps.querySelector('[data-step="accepted"]').className = 'done';
+        jobSteps.querySelector('[data-step="running"]').className = 'active';
+      }
+      if (status === 'done') {
+        for (const item of jobSteps.querySelectorAll('li')) item.className = 'done';
+      }
+      if (status === 'failed') jobSteps.querySelector('[data-step="running"]').className = 'failed';
+    }
+
+    function showAuthRequired() {
+      result.className = 'status error';
+      result.replaceChildren(
+        document.createTextNode('Token fehlt oder ist ungültig. '),
+        Object.assign(document.createElement('a'), {
+          href: '/settings/',
+          textContent: 'Token setzen',
+        }),
+        document.createTextNode(', dann Vaults laden.'),
+      );
     }
 
     async function poll(vault, jobId) {
@@ -48,13 +142,16 @@ import Base from '../layouts/Base.astro';
           continue;
         }
         if (job.status === 'done') {
+          setStep('done');
           show(`Job #${jobId}: fertig ✓`, 'ok');
           return;
         }
         if (job.status === 'failed') {
+          setStep('failed');
           show(`Job #${jobId}: fehlgeschlagen — ${job.error || 'unbekannter Fehler'}`, 'error');
           return;
         }
+        setStep('running');
         show(`Job #${jobId}: ${job.status}…`);
       }
       show(`Job #${jobId}: Zeitlimit erreicht — Status später prüfen.`, 'error');
@@ -62,18 +159,24 @@ import Base from '../layouts/Base.astro';
 
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
+      if (!vaultReady) {
+        showAuthRequired();
+        return;
+      }
       const vault = vaultSel.value;
       const content = document.getElementById('content').value.trim();
       const nodeSet = document.getElementById('node_set').value.trim();
       if (!content) return;
 
       submit.disabled = true;
+      setStep('accepted');
       show('Sende…');
       try {
         const res = await api('/api/ingest', {
           method: 'POST',
           body: JSON.stringify({ vault, content, node_set: nodeSet || null }),
         });
+        setStep('running');
         show(`Job #${res.job_id} angenommen (${res.kind}). Warte auf Verarbeitung…`);
         document.getElementById('content').value = '';
         poll(vault, res.job_id);
@@ -84,4 +187,44 @@ import Base from '../layouts/Base.astro';
       }
     });
   </script>
+  <style>
+    .advanced-fields {
+      margin-top: 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      background: color-mix(in srgb, var(--surface) 78%, transparent);
+    }
+    .advanced-fields summary {
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .field-hint {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+    .job-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.4rem;
+      margin: 0.75rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .job-steps.hidden { display: none; }
+    .job-steps li {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem;
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.8rem;
+    }
+    .job-steps li.active { color: var(--accent); border-color: var(--accent); }
+    .job-steps li.done { color: var(--ok); border-color: var(--ok); }
+    .job-steps li.failed { color: var(--error); border-color: var(--error); }
+  </style>
 </Base>

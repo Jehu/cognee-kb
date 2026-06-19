@@ -2,14 +2,22 @@
 import Base from '../layouts/Base.astro';
 ---
 <Base title="Einstellungen">
-  <h1>Einstellungen</h1>
+  <section class="page-intro">
+    <h1>Einstellungen</h1>
+    <p>Zugriff, Standard-Vault und Verbindung prüfen.</p>
+  </section>
+  <div id="system-status" class="status">Prüfe Systemstatus…</div>
   <form id="settings-form">
-    <label for="token">API-Token (KB_API_TOKEN)</label>
-    <input id="token" type="password" placeholder="Bearer-Token" autocapitalize="off" autocomplete="off" />
+    <label for="token">Zugriffstoken</label>
+    <div class="control-row">
+      <input id="token" type="password" placeholder="Bearer-Token" autocapitalize="off" autocomplete="off" />
+      <button id="toggle-token" class="secondary" type="button">Token anzeigen</button>
+    </div>
 
     <label for="vault">Standard-Vault</label>
     <select id="vault"></select>
 
+    <button id="test-connection" class="secondary" type="button">Status neu testen</button>
     <button type="submit">Speichern</button>
   </form>
   <div id="result" class="status hidden"></div>
@@ -18,20 +26,67 @@ import Base from '../layouts/Base.astro';
     import { initVaultSelect } from '../lib/api.js';
 
     const tokenEl = document.getElementById('token');
+    const toggleToken = document.getElementById('toggle-token');
+    const testConnection = document.getElementById('test-connection');
     const vaultSel = document.getElementById('vault');
     const result = document.getElementById('result');
+    const systemStatus = document.getElementById('system-status');
 
     tokenEl.value = localStorage.getItem('kb_token') || '';
-    initVaultSelect(vaultSel);
+    refreshStatus();
 
-    document.getElementById('settings-form').addEventListener('submit', (ev) => {
+    toggleToken.addEventListener('click', () => {
+      const hidden = tokenEl.type === 'password';
+      tokenEl.type = hidden ? 'text' : 'password';
+      toggleToken.textContent = hidden ? 'Token verbergen' : 'Token anzeigen';
+    });
+
+    testConnection.addEventListener('click', refreshStatus);
+
+    async function loadHealth() {
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) return 'Gateway: Fehler beim Statusabruf';
+        const health = await res.json();
+        const instances = Object.entries(health.instances || {})
+          .map(([name, status]) => `${name}: ${status}`)
+          .join(', ');
+        return `Gateway: ${health.gateway || 'ok'}${instances ? `\nInstanzen: ${instances}` : ''}`;
+      } catch {
+        return 'Gateway: nicht erreichbar';
+      }
+    }
+
+    async function refreshStatus() {
+      const healthText = await loadHealth();
+      const vaultState = await initVaultSelect(vaultSel);
+      const hasToken = !!localStorage.getItem('kb_token');
+      if (!hasToken) {
+        systemStatus.className = 'status error';
+        systemStatus.textContent = `${healthText}\nAuthentifizierung: Token fehlt. Vaults bleiben gesperrt.`;
+        return;
+      }
+      if (!vaultState.ok) {
+        systemStatus.className = 'status error';
+        systemStatus.textContent = `${healthText}\nAuthentifizierung: Token ungültig. Vaults bleiben gesperrt.`;
+        return;
+      }
+      systemStatus.className = 'status ok';
+      const vaultLabels = (vaultState.vaults || vaultState.names.map((name) => ({ name, instance: '' })))
+        .map((vault) => vault.instance ? `${vault.name} (${vault.instance})` : vault.name)
+        .join(', ');
+      systemStatus.textContent = `${healthText}\nAuthentifizierung: ok\nVaults: ${vaultLabels}`;
+    }
+
+    document.getElementById('settings-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const token = tokenEl.value.trim();
       if (token) localStorage.setItem('kb_token', token);
       else localStorage.removeItem('kb_token');
-      localStorage.setItem('kb_vault', vaultSel.value);
+      if (!vaultSel.disabled && vaultSel.value) localStorage.setItem('kb_vault', vaultSel.value);
       result.className = 'status ok';
       result.textContent = 'Gespeichert.';
+      await refreshStatus();
     });
   </script>
 </Base>

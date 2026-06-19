@@ -1,6 +1,12 @@
 // Gemeinsamer API-Helper: same-origin Gateway, Bearer-Token aus localStorage.
 
-export const STATIC_VAULTS = ['privat', 'business-ki', 'business-mwe'];
+export const STATIC_VAULTS = ['privat', 'allgemein', 'business-ki', 'business-mwe'];
+export const STATIC_VAULT_META = [
+  { name: 'privat', instance: 'local' },
+  { name: 'allgemein', instance: 'cloud' },
+  { name: 'business-ki', instance: 'cloud' },
+  { name: 'business-mwe', instance: 'cloud' },
+];
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -15,6 +21,11 @@ export function getToken() {
 
 export function getDefaultVault() {
   return localStorage.getItem('kb_vault') || STATIC_VAULTS[0];
+}
+
+function normalizeVault(vault) {
+  if (typeof vault === 'string') return { name: vault, instance: '' };
+  return { name: vault.name, instance: vault.instance || '' };
 }
 
 export async function api(path, options = {}) {
@@ -42,15 +53,33 @@ export async function api(path, options = {}) {
   return res.json();
 }
 
-// Vault-Namen laden, Fallback auf die drei statischen.
+// Vault-Namen laden. Auth-Fehler sind kein Fallback-Fall: eine unvollständige
+// statische Liste würde sonst wie echte Gateway-Daten wirken.
 export async function loadVaults() {
   try {
     const vaults = await api('/api/vaults');
     if (Array.isArray(vaults) && vaults.length) {
-      return vaults.map((v) => (typeof v === 'string' ? v : v.name));
+      const normalized = vaults.map(normalizeVault).filter((v) => v.name);
+      return {
+        ok: true,
+        source: 'api',
+        vaults: normalized,
+        names: normalized.map((v) => v.name),
+      };
     }
-  } catch { /* Fallback */ }
-  return STATIC_VAULTS;
+  } catch (e) {
+    if (e.status === 401) {
+      return { ok: false, reason: 'auth', names: [], message: e.message };
+    }
+    return {
+      ok: true,
+      source: 'fallback',
+      vaults: STATIC_VAULT_META,
+      names: STATIC_VAULTS,
+      message: e.message,
+    };
+  }
+  return { ok: true, source: 'fallback', vaults: STATIC_VAULT_META, names: STATIC_VAULTS };
 }
 
 // Token bleibt im Authorization-Header, nie in der URL — sonst landet er im
@@ -77,14 +106,42 @@ export async function openSourceRaw(vault, sourceId) {
 
 // <select> mit Vaults befüllen, Standard-Vault vorauswählen.
 export async function initVaultSelect(select) {
-  const names = await loadVaults();
+  const state = await loadVaults();
   const current = getDefaultVault();
+  const vaults = state.vaults || state.names.map((name) => ({ name, instance: '' }));
+  const names = vaults.map((v) => v.name);
   select.innerHTML = '';
-  for (const name of names) {
+  select.disabled = !state.ok;
+  select.dataset.vaultState = state.ok ? state.source : state.reason;
+  if (!state.ok) {
     const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
+    opt.value = '';
+    opt.textContent = 'Token in Einstellungen setzen';
     select.appendChild(opt);
+    return state;
+  }
+  const groups = new Map();
+  for (const vault of vaults) {
+    const groupName = vault.instance || 'Vaults';
+    if (!groups.has(groupName)) groups.set(groupName, []);
+    groups.get(groupName).push(vault);
+  }
+  for (const [groupName, groupVaults] of groups) {
+    const group = document.createElement('optgroup');
+    group.label = groupName;
+    for (const vault of groupVaults) {
+      const opt = document.createElement('option');
+      opt.value = vault.name;
+      opt.textContent = vault.instance ? `${vault.name} (${vault.instance})` : vault.name;
+      group.appendChild(opt);
+    }
+    select.appendChild(group);
   }
   if (names.includes(current)) select.value = current;
+  return state;
+}
+
+export async function loadNodeSets(vault) {
+  const data = await api(`/api/node-sets/${encodeURIComponent(vault)}`);
+  return Array.isArray(data.node_sets) ? data.node_sets : [];
 }

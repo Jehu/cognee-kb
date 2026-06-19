@@ -1,5 +1,5 @@
 // Minimaler Service Worker: App-Shell-Cache, network-first für /api.
-const CACHE = 'kb-shell-v2';
+const CACHE = 'kb-shell-v7';
 const SHELL = ['/', '/chat/', '/settings/', '/manifest.webmanifest', '/icons/icon.svg'];
 
 self.addEventListener('install', (event) => {

@@ -41,6 +41,17 @@ PWA bauen (liefert das Gateway aus `web/dist/` aus):
 cd web && npm install && npm run build
 ```
 
+In der PWA wird der Bearer-Token lokal in den Einstellungen hinterlegt. Ohne
+gültigen Token lädt die App keine Vault-Liste aus dem Gateway und sperrt
+Vault-Auswahl sowie Ingest-/Chat-Aktionen; die Einstellungen zeigen zusätzlich
+Gateway-, Instanz- und Authentifizierungsstatus. Vault-Auswahlen zeigen die
+zugehörige Wall (`local`/`cloud`) gruppiert und im Optionstext an.
+Der Ingest-Screen ist als schneller Capture-Flow aufgebaut (Metadaten einklappbar,
+Node-Set-Autosuggest aus bestehenden Jobs, Job-Fortschritt sichtbar); der Chat
+zeigt im leeren Zustand Beispiel-Fragen und als verwandte Quelle nur den besten
+Chunk-Treffer zur Frage. Die Einstellungen bieten Token-Anzeige sowie einen
+Verbindungstest.
+
 Starten (drei Terminals):
 
 ```sh
