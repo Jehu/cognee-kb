@@ -90,3 +90,41 @@ def test_load_raises_configerror_on_inconsistent_topology(tmp_path):
     )
     with pytest.raises(ConfigError):
         config._load(bad)
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        # Wall mit ungueltigem mode.
+        '[walls.local]\nmode = "bogus"\nport = 8801\n',
+        # Wall ohne port.
+        '[walls.local]\nmode = "local"\n',
+        # Gar keine Walls definiert.
+        '[[vaults]]\nname = "privat"\nwall = "local"\n',
+        # Vault-Eintrag ohne wall.
+        '[walls.local]\nmode = "local"\nport = 8801\n\n[[vaults]]\nname = "privat"\n',
+        # Vault doppelt definiert.
+        '[walls.local]\nmode = "local"\nport = 8801\n\n'
+        '[[vaults]]\nname = "privat"\nwall = "local"\n'
+        '[[vaults]]\nname = "privat"\nwall = "local"\n',
+        # Walls, aber keine Vaults.
+        '[walls.local]\nmode = "local"\nport = 8801\n',
+        # Port kollidiert mit dem Gateway (8800).
+        '[walls.local]\nmode = "local"\nport = 8800\n\n'
+        '[[vaults]]\nname = "privat"\nwall = "local"\n',
+        # Zwei Walls auf demselben Port.
+        '[walls.local]\nmode = "local"\nport = 8801\n'
+        '[walls.cloud]\nmode = "cloud"\nport = 8801\n'
+        '[[vaults]]\nname = "privat"\nwall = "local"\n',
+    ],
+)
+def test_load_rejects_bad_topology(tmp_path, toml):
+    # Jede Fixture triggert einen eigenen ConfigError-Zweig in _load — die
+    # Topologie-Validierung ist das Rueckgrat der Daten-Routing- und
+    # Privacy-Wand-Garantien, deshalb vollstaendig abgedeckt.
+    from kb import config
+
+    bad = tmp_path / "kb.toml"
+    bad.write_text(toml)
+    with pytest.raises(ConfigError):
+        config._load(bad)
