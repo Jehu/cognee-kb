@@ -103,3 +103,13 @@ def get_vault(name: str) -> Vault:
 
 def get_instance(name: str) -> Instance:
     return INSTANCES[name]
+
+
+def queue_path(instance_name: str) -> Path:
+    """Pfad zur Queue-DB einer Instanz (geteilt von Gateway/MCP/CLI)."""
+    return get_instance(instance_name).var_dir / "queue.db"
+
+
+def sources_path(instance_name: str) -> Path:
+    """Pfad zur Source-DB einer Instanz (geteilt von Gateway/MCP/CLI)."""
+    return get_instance(instance_name).var_dir / "sources.db"

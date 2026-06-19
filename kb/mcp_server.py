@@ -1,8 +1,8 @@
 """Dünner stdio-MCP-Server pro Instanz (FastMCP) — analog zum Gateway.
 
 Wie das Gateway läuft dieser Prozess OHNE cognee-Import (Privacy-Wand): Queries
-gehen per httpx an den Instance Service, Ingest direkt in die SQLite-Queue.
-Erlaubte kb-Imports daher nur: config, classify, queue.
+gehen per Query-Proxy an den Instance Service, Ingest direkt in die SQLite-Queue.
+Erlaubte kb-Imports daher nur: config, classify, queue, query_proxy.
 
 Startwege (primär: CLI):
   * `kb serve-mcp <instance>`                  ← primär
@@ -10,19 +10,11 @@ Startwege (primär: CLI):
 """
 
 import os
-from pathlib import Path
-
-import httpx
 
 from kb.classify import build_payload
-from kb.config import VAULTS, get_instance
+from kb.config import VAULTS, get_instance, queue_path
+from kb.query_proxy import QueryProxyError, proxy_query
 from kb.queue import JobQueue
-
-QUERY_TIMEOUT = 120.0   # GRAPH_COMPLETION kann dauern
-
-
-def queue_path(instance_name: str) -> Path:
-    return get_instance(instance_name).var_dir / "queue.db"
 
 
 def _tool_name(vault_name: str) -> str:
@@ -41,24 +33,10 @@ def build_server(instance_name: str):
 
     async def _query(question: str, datasets: list[str]) -> str:
         try:
-            async with httpx.AsyncClient(timeout=QUERY_TIMEOUT) as client:
-                r = await client.post(
-                    f"http://127.0.0.1:{inst.port}/query",
-                    json={"question": question, "datasets": datasets})
-        # TransportError deckt ConnectError, Timeouts, ReadError etc. ab.
-        except httpx.TransportError:
-            return (f"Instance Service nicht erreichbar (Port {inst.port}) — "
-                    f"läuft `kb serve-instance {inst.name}`?")
-        if r.status_code != 200:
-            return f"Instance Service antwortete mit {r.status_code}"
-        # Defensiv: 200 mit unerwartetem/non-JSON-Body darf keinen Traceback
-        # an den Agenten durchreichen, sondern eine lesbare Meldung liefern.
-        try:
-            data = r.json()
-        except ValueError:
-            return f"Instance Service lieferte keine JSON-Antwort: {r.text[:200]}"
-        answer = data.get("answer") if isinstance(data, dict) else None
-        return answer if answer else f"Instance Service lieferte keine Antwort: {data}"
+            data = await proxy_query(instance_name, question, datasets)
+        except QueryProxyError as e:
+            return str(e)
+        return data["answer"]
 
     # --- pro Vault ein search-Tool (Closure über vault sauber gebunden) ---
     for v in vaults:

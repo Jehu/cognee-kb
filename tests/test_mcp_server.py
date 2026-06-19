@@ -4,10 +4,9 @@ import sys
 import httpx
 import pytest
 
-from kb import mcp_server
+from kb import mcp_server, query_proxy
 from kb.config import INSTANCES, VAULTS, get_instance
 from kb.queue import JobQueue
-
 
 def _tool_names(server) -> set[str]:
     return {t.name for t in asyncio.run(server.list_tools())}
@@ -175,7 +174,7 @@ def test_search_calls_correct_port_and_dataset(monkeypatch):
     cloud = get_instance("cloud")
     vault = _vaults_of("cloud")[0]
     calls = []
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
     answer = asyncio.run(
@@ -195,7 +194,7 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
         pytest.skip("cloud-Wall hat <2 Vaults — Late-Binding nicht testbar")
     first = cloud_vaults[0]
     calls = []
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, mcp_server._tool_name(first.name), question="Was ist X?"))
@@ -204,7 +203,7 @@ def test_search_binds_correct_dataset_for_non_last_vault(monkeypatch):
 
 
 def test_search_200_without_answer_key_is_readable(monkeypatch):
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(payload={"error": "boom"})))
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
@@ -213,7 +212,7 @@ def test_search_200_without_answer_key_is_readable(monkeypatch):
 
 
 def test_search_non_200_returns_status_message(monkeypatch):
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(status_code=500)))
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
@@ -224,7 +223,7 @@ def test_search_all_uses_all_datasets(monkeypatch):
     if len(_vaults_of("cloud")) < 2:
         pytest.skip("cloud-Wall hat <2 Vaults — search_all existiert nicht")
     calls = []
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(response=_FakeResponse(), calls=calls))
     server = mcp_server.build_server("cloud")
     asyncio.run(_call(server, "search_all", question="Y?"))
@@ -233,7 +232,7 @@ def test_search_all_uses_all_datasets(monkeypatch):
 
 
 def test_search_instance_down_returns_readable_message(monkeypatch):
-    monkeypatch.setattr(mcp_server.httpx, "AsyncClient",
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
                         _fake_async_client(exc=httpx.ConnectError("zu")))
     server = mcp_server.build_server("local")
     msg = asyncio.run(_call(server, "search_privat", question="Hallo?"))
