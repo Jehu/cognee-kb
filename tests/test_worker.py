@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -222,3 +223,23 @@ async def test_process_one_cleans_up_on_ingest_failure_then_reingests(tmp_path):
     assert worked is True
     assert q.status(j2) == "done"
     succeeding.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_job_logs_job_id_vault_and_request_id(tmp_path, caplog):
+    # Strukturiertes Logging: eine gescheiterte Job-Variable enthält job id,
+    # Vault und (falls im Payload) die request_id — zur Korrelation über 3 Prozesse.
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "web", {"url": "https://example.com/x", "request_id": "rid-9"})
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.fetch_web.fetch", side_effect=RuntimeError("offline")),
+        caplog.at_level(logging.ERROR, logger="kb.worker"),
+    ):
+        await process_one_async(None, q=q, store=store)
+    assert q.status(jid) == "failed"
+    msg = next(r.getMessage() for r in caplog.records if r.name == "kb.worker")
+    assert f"job={jid}" in msg
+    assert "vault=privat" in msg
+    assert "request_id=rid-9" in msg

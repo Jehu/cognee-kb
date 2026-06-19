@@ -171,7 +171,7 @@ def _fake_async_client(response=None, exc=None, calls=None):
         async def __aexit__(self, *exc_info):
             return False
 
-        async def post(self, url, json=None):
+        async def post(self, url, json=None, headers=None):
             if calls is not None:
                 calls.append((url, json))
             if exc is not None:

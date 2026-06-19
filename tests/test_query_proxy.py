@@ -18,7 +18,7 @@ def _client(response=None, exc=None):
         async def __aexit__(self, *e):
             return False
 
-        async def post(self, url, json=None):
+        async def post(self, url, json=None, headers=None):
             if exc is not None:
                 raise exc
             return response
@@ -75,3 +75,26 @@ def test_missing_answer_raises(monkeypatch):
     )
     with pytest.raises(QueryProxyError, match="keine Antwort"):
         asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
+
+
+def test_forwards_request_id_header(monkeypatch):
+    # Korrelation Gateway → Instance: X-Request-ID wird als Header mitgegeben.
+    sent: dict[str, object] = {}
+
+    class _CapturingClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *e):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            sent["headers"] = headers
+            return _Resp(payload={"answer": "x"})
+
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _CapturingClient)
+    asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"], request_id="abc-123"))
+    assert sent["headers"] == {"X-Request-ID": "abc-123"}

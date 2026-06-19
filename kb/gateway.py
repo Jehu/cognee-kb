@@ -6,6 +6,7 @@ SQLite-Queue (WAL), Queries werden per HTTP an den Instance Service geproxyt.
 
 import os
 import secrets
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from kb.config import (
     queue_path,
     sources_path,
 )
+from kb.logging_setup import setup_logging
 from kb.query_proxy import QueryProxyError, proxy_query
 from kb.queue import JobQueue
 from kb.sources import SourceStore
@@ -70,6 +72,7 @@ class QueryBody(BaseModel):
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     app = FastAPI(title="kb-gateway")
     api = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
@@ -77,10 +80,14 @@ def create_app() -> FastAPI:
     async def security_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        # Pro Request eine Korrelations-ID (Gateway → Instance /query → Logs).
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+        request.state.request_id = request_id
         # Defense-in-depth: das Bearer-Token liegt im PWA-localStorage. Ein
         # künftiges innerHTML/set:html würde ohne CSP sofort den Token
         # exfiltrieren — CSP macht daraus einen containerten Bruch.
         response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
         response.headers["Content-Security-Policy"] = (
             "default-src 'self';"
             "connect-src 'self';"
@@ -100,22 +107,25 @@ def create_app() -> FastAPI:
         return response
 
     @api.post("/ingest", status_code=202)
-    def ingest(body: IngestBody) -> dict[str, object]:
+    def ingest(request: Request, body: IngestBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         # Kein Datei-Pfad-Zweig wie im CLI — HTTP-Clients liefern keine lokalen Pfade.
         kind, payload = build_payload(body.content)
         if body.node_set:
             payload["node_set"] = body.node_set
+        payload["request_id"] = request.state.request_id  # für Worker-Log-Korrelation
         # JobQueue pro Request — sqlite3-Verbindungen sind thread-gebunden.
         q = JobQueue(queue_path(v.instance))
         jid = q.enqueue(v.name, kind, payload)
         return {"job_id": jid, "vault": v.name, "kind": kind}
 
     @api.post("/query")
-    async def query(body: QueryBody) -> dict[str, object]:
+    async def query(request: Request, body: QueryBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         try:
-            data = await proxy_query(v.instance, body.question, [v.dataset])
+            data = await proxy_query(
+                v.instance, body.question, [v.dataset], request_id=request.state.request_id
+            )
         except QueryProxyError as e:
             raise HTTPException(502, str(e)) from None
         return {"vault": v.name, "answer": data["answer"], "sources": data.get("sources", [])}
