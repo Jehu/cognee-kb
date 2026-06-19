@@ -11,8 +11,8 @@ row when done.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001  | One-command verification baseline (Python + web) | P1 | S | — | TODO |
-| 002  | Fix ghost source record on ingest failure | P1 | S | 001 | TODO |
+| 001  | One-command verification baseline (Python + web) | P1 | S | — | DONE |
+| 002  | Fix ghost source record on ingest failure | P1 | S | 001 | DONE |
 | 003  | Fix MCP snippet-title divergence | P1 | S | — | TODO |
 | 004  | Block SSRF in web-ingest | P1 | M | — | TODO |
 | 005  | Confine raw-source endpoint to raw_dir | P1 | S | — | TODO |
