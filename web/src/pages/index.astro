@@ -34,6 +34,7 @@ import Base from '../layouts/Base.astro';
   <script>
     import { api, initVaultSelect, loadNodeSets } from '../lib/api.js';
     import { makeToken, poll as pollJob } from '../lib/poll.js';
+    import { loadCurrentNodeSets } from '../lib/nodesets.js';
 
     const form = document.getElementById('ingest-form');
     const vaultSel = document.getElementById('vault');
@@ -95,16 +96,15 @@ import Base from '../layouts/Base.astro';
 
     async function refreshNodeSetSuggestions() {
       nodeSetSuggestions.replaceChildren();
-      if (!vaultSel.value) return;
-      try {
-        const nodeSets = await loadNodeSets(vaultSel.value);
-        for (const nodeSet of nodeSets) {
-          const option = document.createElement('option');
-          option.value = nodeSet;
-          nodeSetSuggestions.appendChild(option);
-        }
-      } catch {
-        // Vorschläge sind Komfort; Ingest darf ohne sie weiter funktionieren.
+      // Staleness-Guard: ein träger Request eines vorher gewählten Vaults darf
+      // nicht dessen Node-Sets einschleusen, während ein anderer Vault aktiv ist.
+      const nodeSets = await loadCurrentNodeSets(
+        vaultSel.value, (v) => vaultSel.value === v, loadNodeSets);
+      if (!nodeSets) return;
+      for (const nodeSet of nodeSets) {
+        const option = document.createElement('option');
+        option.value = nodeSet;
+        nodeSetSuggestions.appendChild(option);
       }
     }
 
