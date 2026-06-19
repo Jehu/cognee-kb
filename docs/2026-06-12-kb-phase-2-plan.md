@@ -1,5 +1,9 @@
 # Phase 2 — Gateway + PWA + iOS-Ingest
 
+> **Status 2026-06-14:** Umgesetzt. Dieser Plan bleibt als Bauprotokoll erhalten;
+> aktuelle Befehle und Topologie stehen in [`README.md`](../README.md),
+> [`CLAUDE.md`](../CLAUDE.md) und [`kb.toml`](../kb.toml).
+
 Stand: 2026-06-12 · Voraussetzung: Phase-0-Gate bestanden (Cognee 6/8), Phase 1 implementiert.
 
 ## Architekturentscheidung

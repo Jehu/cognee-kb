@@ -1,5 +1,12 @@
 # KB Phase 0+1 Implementation Plan
 
+> **Status 2026-06-14:** Historischer Implementierungsplan. Phase 0+1 sind im
+> aktuellen Codebestand umgesetzt; die offenen Checkboxen unten sind nicht mehr
+> als aktive To-do-Liste zu lesen. Aktuelle Topologie, Befehle und Betriebsregeln
+> stehen in [`README.md`](../README.md), [`CLAUDE.md`](../CLAUDE.md) und
+> [`kb.toml`](../kb.toml). Diese Datei bleibt als Bau-/Entscheidungsprotokoll
+> erhalten.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Validierung von Cognee (Phase 0) und Bau des Ingestion-Workers mit Multi-Vault-Routing, Provenance und Rohschicht (Phase 1).

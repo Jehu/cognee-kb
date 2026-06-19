@@ -1,5 +1,9 @@
 # Quellen-Chip — Stufe 1 + Stufe 1.5 (Implementierungsplan)
 
+> **Status 2026-06-14:** Umgesetzt. Der Plan bleibt als Bauprotokoll erhalten;
+> offene BeeMind-Folgeideen stehen in
+> [`2026-06-13-ideen-beemind.md`](2026-06-13-ideen-beemind.md).
+
 > Ergebnis des Spezialisten-Disputs vom 2026-06-13. Stufe 2 (CYPHER-Fallback für
 > Multi-Chunk-Docs) ist bewusst **nicht** Teil dieses Plans (YAGNI — heute kein
 > reales Doc > 1 Chunk).

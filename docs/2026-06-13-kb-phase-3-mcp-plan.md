@@ -1,5 +1,9 @@
 # Phase 3 — MCP-Integration
 
+> **Status 2026-06-14:** Umgesetzt. Offen aus der ursprünglichen Phase 3 bleibt
+> nur die separate Migration bestehender Markdown-KB in den passenden Business-
+> Vault; sie ist nicht Teil dieses MCP-Plans.
+
 Stand: 2026-06-13 · Voraussetzung: Phase 1+2 fertig (Instance Services 8801/8802 laufen).
 Scope dieses Plans: **nur MCP-Integration**. Migration der bestehenden Markdown-KB ist separat.
 

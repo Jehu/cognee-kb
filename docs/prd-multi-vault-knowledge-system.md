@@ -26,7 +26,7 @@ Single-User (Marco) + seine Agenten (Claude Code, Huginn).
 - **F3 Isolation:** Die local-Instanz ist **physisch** getrennt (eigene Cognee-Instanz, eigener Prozess, eigene Datenpfade, eigener MCP-Server). Die Business-Vaults sind Datasets der gemeinsamen cloud-Instanz mit `ENABLE_BACKEND_ACCESS_CONTROL=true` (ohne das Flag ignoriert Cognee Dataset-Filter!).
 - **F4 Provenance:** Jede Quelle bekommt einen Source-Record (id, type, url, video_id, locator, fetched_at, raw_md_path) in eigener SQLite-Tabelle + als Frontmatter in der Rohtext-`.md`. Cognee bekommt `node_set`-Tags; Custom-Metadata existiert in Cognee nicht via REST/MCP.
 - **F5 Rohschicht:** Jeder Ingest erzeugt eine kanonische `.md`-Kopie unter `raw/<vault>/` (Exit-Versicherung, Re-Ingest-Fähigkeit).
-- **F6 LLM-Routing:** local-Instanz: Ollama-LLM, Embeddings in-process via fastembed (kein Cloud-Call, auch nicht query-seitig). cloud-Instanz: Cloud-LLM (OpenRouter oder Infomaniak), Embeddings ebenfalls in-process via fastembed — damit VPS-tauglich ohne Ollama.
+- **F6 LLM-Routing:** local-Instanz: Ollama-LLM, Embeddings in-process via fastembed (kein Cloud-Call, auch nicht query-seitig). cloud-Instanz: OpenRouter/DeepSeek-kompatibler Cloud-LLM, Embeddings ebenfalls in-process via fastembed — damit VPS-tauglich ohne Ollama.
 - **F7 Serielle Ingestion:** Pro Instanz genau ein Worker-Prozess, Jobs strikt seriell (Cognee-Config ist prozess-global; parallele cognify-Calls = Race Condition).
 - **F8 Agent-Zugriff:** Ein `cognee-mcp`-Server pro Instanz. Der local-MCP wird nur in privaten Kontexten registriert.
 - **F9 iOS-Ingest:** Kurzbefehl „Teilen → an KB" → `POST /ingest` (Gateway), erreichbar via Tailscale.
@@ -66,7 +66,7 @@ Single-User (Marco) + seine Agenten (Claude Code, Huginn).
   - Zusätzlich verifizieren: Dataset-Scoping mit `ENABLE_BACKEND_ACCESS_CONTROL=true` funktioniert real (Bleed-Test wegen cognee#1023); Embedding-Qualität von `paraphrase-multilingual-mpnet-base-v2` (fastembed) reicht für deutsche Inhalte.
 - **Phase 1 — Ingestion-Worker:** Queue, Fetcher (YouTube/Web/Snippet/Datei), Provenance, Rohschicht, CLI, Env-Guards. → Detailplan: [2026-06-12-kb-implementierungsplan.md](2026-06-12-kb-implementierungsplan.md)
 - **Phase 2 — Gateway + PWA + iOS:** FastAPI-Endpoints, Astro-PWA, Kurzbefehl, Tailscale. (Eigener Plan nach Phase 1.)
-- **Phase 3 — Agent-Integration + Migration:** MCP-Registrierung, bestehende Markdown-KB in Business-Vault migrieren. (Eigener Plan.)
+- **Phase 3 — Agent-Integration + Migration:** MCP-Registrierung ist umgesetzt; offen bleibt die Migration bestehender Markdown-KB in den passenden Business-Vault.
 
 ## 6. Erfolgskriterien
 

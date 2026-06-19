@@ -1,6 +1,6 @@
 # Architektur: Multi-Vault Knowledge-System mit Cognee-Kern
 
-*Bauvorlage, Stand 12. Juni 2026. Technische Aussagen zu Cognee sind mit Quellen belegt (siehe Ende). Offene Entscheidungen sind als konditionale WENN/DANN-Zweige mit Konfidenz und Falsifizierbarkeit markiert.*
+*Bauvorlage, Stand 12. Juni 2026. Technische Aussagen zu Cognee sind mit Quellen belegt (siehe Ende). Status-Updates spiegeln den aktuellen Projektstand wider.*
 
 ---
 
@@ -30,18 +30,18 @@ Cognee bietet drei Isolations-Ebenen ([Permissions-Doku](https://docs.cognee.ai/
 - **Node Set** — feinere logische Gruppierung (Thema/Projekt), die Suche/Abruf eingrenzt.
 - **`ENABLE_BACKEND_ACCESS_CONTROL=true`** erzwingt Daten-Isolation auf User+Dataset-Ebene für Graph *und* Vektor-Store (Auth wird Pflicht).
 
-**Mapping deiner Vaults** (Business KI-Beratung, Business MWE, Privat):
+**Mapping deiner Vaults** (Privat, Allgemein, Business KI-Beratung, Business MWE):
 
-- WENN Single-User, einfache Trennung genügt → **Vault = Dataset**. Cross-Vault-Suche = Query über mehrere Datasets; Privat bleibt per Default ausgeschlossen. (Empfehlung für Start, Konfidenz ~70 %)
-- WENN du *harte* Wände willst (Privat: Philosophie/Medien/Propaganda strikt weg von Beruflichem) ODER Business MWE später für Kunden teilen möchtest → **Vault = Tenant** + Access Control aktivieren. (Konfidenz ~60 %)
-- Innerhalb eines Vaults: **Node Sets** je Thema (z. B. im Business-KI-Vault: `n8n`, `mcp`, `seo`).
+- **Wall = harte Datenschutzgrenze:** `local` und `cloud` sind getrennte Verarbeitungs-Instanzen mit eigenem Prozess, eigener Env und eigenem LLM.
+- **Vault = Dataset innerhalb einer Wall:** Cross-Vault-Suche bleibt technisch möglich, aber nur innerhalb der gewählten Wall und nur explizit.
+- **Privat liegt in `local`:** Ollama-only, keine Cloud-LLM-Calls; die Trennung wird durch `kb.toml`, `.env.local` und `guard.assert_instance_env` erzwungen.
+- **Business-Vaults liegen in `cloud`:** Cloud-LLM mit lokalen fastembed-Embeddings; `ENABLE_BACKEND_ACCESS_CONTROL=true` erzwingt Dataset-Scoping.
+- Innerhalb eines Vaults: **Node Sets** je Quelle/Thema.
 
-*Falsifizierung:* Wenn ein Cross-Vault-Synthese-Bedarf entsteht, der Privat+Business mischen müsste, ist die harte Tenant-Trennung hinderlich → dann Dataset-Modell. Vor Festlegung: 2–3 reale Abfragen durchspielen, ob je Cross-Vault nötig ist.
-
-> **Entscheidung (getroffen): Vault = Dataset.** Begründung: Cross-Vault-Suche soll möglich sein, aber **optional** — das spricht gegen harte Tenant-Wände, weil eine Query über mehrere Datasets technisch einfach ist, eine über getrennte Tenants dagegen umständlich. Konkret:
+> **Entscheidung (getroffen): Vault = Dataset innerhalb einer Wall.** Begründung: Cross-Vault-Suche soll möglich sein, aber **optional** — das spricht gegen Tenant-Wände zwischen Business-Vaults. Privat bekommt die harte Wand nicht über Tenant, sondern über die getrennte lokale Wall. Konkret:
 > - Jeder Vault ist ein eigenes Dataset; Default-Abfrage ist **immer single-vault** (isoliert).
-> - Cross-Vault ist ein **bewusst gesetztes Flag** in der Query (z. B. `scope=["business-ki", "business-mwe"]`).
-> - **Privat ist per Default aus jedem Cross-Vault-Scope ausgeschlossen** und nur explizit einzeln abfragbar. WENN für Privat später doch eine *harte* Wand nötig wird (kein versehentliches Mischen) → diesen einen Vault zusätzlich über Access Control / separaten Tenant absichern, Business-Vaults bleiben Datasets.
+> - Cross-Vault ist ein **bewusst gesetzter Scope** in der Query.
+> - **Privat ist hart getrennt**, weil der Vault in der `local`-Wall läuft; Business-Abfragen laufen gegen die `cloud`-Wall.
 
 ---
 
@@ -85,21 +85,22 @@ Erreichbarkeit des self-hosted Servers von unterwegs: **Tailscale** (privates Ne
 
 ## 6. Tech-Stack-Vorschlag (konditional)
 
-- **Cognee:** self-host via Docker; Storage Postgres; LLM-Provider **pro Vault konfigurierbar** — Ollama (lokal), Infomaniak und OpenRouter. OpenRouter und Infomaniak sind OpenAI-API-kompatibel und damit über `LLM_PROVIDER`/`LLM_ENDPOINT`/`LLM_API_KEY` (bzw. `base_url`) einbindbar; Ollama wird von Cognee nativ unterstützt. *Hinweis:* Cognee setzt LLM-Konfiguration primär global/per-Instanz — Per-Vault-Routing löst du sauber über den Ingestion-Worker (er wählt je Ziel-Vault Provider + Modell, bevor er `cognify` anstößt). Konfidenz, dass das so trägt: ~70 %; falsifizierbar, falls Cognee in deiner Version nur eine globale LLM-Config zulässt → dann pro Vault eine eigene Cognee-Konfiguration/Instanz.
+- **Cognee:** self-hosted Python-SDK; je Wall eigene Datenpfade und eigene LLM-Env. `local` nutzt Ollama, `cloud` nutzt den OpenAI-kompatiblen OpenRouter/DeepSeek-Endpoint aus `.env.cloud`.
 - **Ingestion-Worker:** Python (passt zu Cognee-SDK + `youtube-transcript-api`/`yt-dlp`).
 - **Frontend/PWA:** Astro (dein Stack) als installierbare PWA mit Ingest-Form + Chat + Vault-Switcher.
-- **Agent-Zugriff:** Cognee-**MCP-Server** → Claude Code & andere Agenten fragen nativ ([cognee-mcp](https://glama.ai/mcp/servers/topoteretes/cognee)).
+- **Agent-Zugriff:** eigener dünner stdio-MCP-Server (`kb/mcp_server.py`), der nur an den Instance Service proxyt und keinen zweiten cognee/Kuzu-Schreiber öffnet.
 - **Netz:** Tailscale für Mac+iOS.
 
-**LLM-Routing pro Vault (getroffen):** Jeder Vault bekommt eine eigene Provider+Modell-Zuordnung. Verfügbar: **Ollama (lokal), Infomaniak, OpenRouter.** Empfehlung als Default-Belegung (anpassbar):
+**LLM-Routing pro Wall (getroffen):** `kb.toml` ist die Topologie-Quelle; die Wall bestimmt den erlaubten Provider. Verfügbar: **Ollama lokal** und **OpenAI-kompatible Cloud-Endpunkte**. Aktuelle Default-Belegung:
 
 | Vault | Default-Provider | Begründung |
 |---|---|---|
 | Privat | Ollama (lokal) | Datenschutz hart → keine Cloud-Calls bei Philosophie/Medien/Propaganda |
-| Business KI-Beratung | OpenRouter *oder* Infomaniak | Qualität/Modell-Auswahl; Geschäftsdaten weniger sensibel als Privat |
-| Business MWE | Infomaniak *oder* OpenRouter | wie oben; ggf. Schweiz-Hosting via Infomaniak bevorzugen |
+| Allgemein | OpenRouter / DeepSeek (`custom`) | Cloud-Wall für nicht-private Inhalte |
+| Business KI-Beratung | OpenRouter / DeepSeek (`custom`) | Cloud-Wall für Business-Inhalte |
+| Business MWE | OpenRouter / DeepSeek (`custom`) | Cloud-Wall für Business-Inhalte |
 
-Das Routing implementiert der Ingestion-Worker (Provider-Auswahl je Ziel-Vault); siehe §6.
+Das Routing ist nicht mehr offen: `local` erlaubt nur Ollama, `cloud` erlaubt den Cloud-Endpoint aus `.env.cloud`; `guard.assert_instance_env` prüft das vor cognee-Calls.
 
 ---
 
@@ -108,7 +109,7 @@ Das Routing implementiert der Ingestion-Worker (Provider-Auswahl je Ziel-Vault);
 - **Phase 0 — Validierung (vor Vollausbau):** Cognee lokal + Ollama, 1 Dataset, ~10 echte Quellen manuell rein. Dann 5–10 echte Geschäfts-/Synthese-Fragen stellen. *Gate:* Liefert Cognees Synthese spürbar bessere Antworten als dein heutiges json-GraphRAG? WENN nein → Annahme „Cognee lohnt" ist falsifiziert, Stack überdenken.
 - **Phase 1 — Ingestion-Worker:** Web + YouTube + Snippet + Provenance, Routing in den richtigen Vault.
 - **Phase 2 — Oberfläche:** Astro-PWA (Ingest-Form + Chat + Vault-Switcher) + iOS-Kurzbefehl.
-- **Phase 3 — Multi-Vault-Härtung:** Tenant/Access-Control je nach §2-Entscheidung; optionale Migration deiner bestehenden `raw/`-Markdown-KB in den Business-Vault.
+- **Phase 3 — Agent-Zugriff + Migration:** MCP-Integration ist umgesetzt; offen bleibt die optionale Migration bestehender Markdown-KB in den Business-Vault.
 
 ---
 
@@ -118,12 +119,13 @@ Das Routing implementiert der Ingestion-Worker (Provider-Auswahl je Ziel-Vault);
 
 1. **Isolations-Modell:** Vault = **Dataset** (siehe §2). Default-Abfrage single-vault.
 2. **Cross-Vault-Suche:** **erlaubt, aber optional** — nur per explizitem Scope-Flag; Privat per Default ausgeschlossen (§2).
-3. **LLM-Routing:** **pro Vault konfigurierbar** über Ollama / Infomaniak / OpenRouter; Default-Belegung in §6.
+3. **LLM-Routing:** **pro Wall erzwungen**: `local` → Ollama, `cloud` → OpenRouter/DeepSeek-kompatibler Cloud-Endpoint.
+4. **Harte Wand für Privat:** erledigt über getrennte `local`-Wall mit eigenem Prozess, eigener Env, eigenen Datenpfaden und Provider-Guard.
 
-**Noch offen:**
+**Noch offen / zu dokumentieren:**
 
-- **Provider-Feinwahl je Business-Vault:** OpenRouter (Modell-Vielfalt) vs. Infomaniak (CH-Hosting) für KI-Beratung bzw. MWE — entscheidbar in Phase 0 anhand von Antwortqualität + Tempo.
-- **Harte Wand für Privat:** ob das Dataset-Modell reicht oder Privat zusätzlich Access-Control/Tenant bekommt (§2) — abhängig davon, wie kritisch versehentliches Mischen wäre.
+- **Migration:** bestehende Markdown-KB in den passenden Business-Vault importieren.
+- **Betriebswerte:** Ingest-Kosten/Latenz auf echter Hardware messen und festhalten.
 
 ---
 

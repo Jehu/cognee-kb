@@ -28,31 +28,26 @@ Cognee-Graph, Chat-mit-Quellen ↔ `GRAPH_COMPLETION`.
 
 ## Abgeleitete Ideen
 
-### 1. Source-Attribution im Query-Output (wichtigster Punkt)
+### 1. Source-Attribution im Query-Output
 
-**Status:** verifizierte Lücke, lohnt sich.
+**Status:** umgesetzt.
 
 BeeMind verkauft „jede Antwort rückverweisbar zum Snippet" als Kernversprechen.
-Bei uns ist die Daten-Brücke bereits da, wird im Query aber nie überquert:
+Die Daten-Brücke wird inzwischen im Query-Pfad überquert:
 
-- `query()` in [`cognee_io.py:53`](../kb/cognee_io.py) nutzt **ausschließlich**
-  `SearchType.GRAPH_COMPLETION` → liefert LLM-synthetisierten Fließtext
-  (`search_result`) **ohne Quell-IDs**.
-- `_render` ([`cognee_io.py:66`](../kb/cognee_io.py)) extrahiert nur diesen Text.
-- Dabei trägt jede `.md`-Rohdatei `source_id` im Frontmatter
-  ([`sources.py:57`](../kb/sources.py)), und `SourceStore` hält
-  `source_id → raw_md_path` ([`sources.py:63`](../kb/sources.py)).
-
-**Offener Verifikationsschritt:** Prüfen, ob cognee 0.3.9 einen SearchType bietet,
-der die zugrundeliegenden Chunks **mit Herkunftsmetadaten** zurückgibt (Kandidaten:
-begleitender `CHUNKS`-Lauf, `GRAPH_COMPLETION_CONTEXT_EXTENSION`). Wenn die Chunks
-die Quelldatei kennen, lässt sich über den `source_id`-Frontmatter zurück auf die
-`sources`-Tabelle mappen und die Antwort mit Quellen anreichern. Muss gegen die
-installierte Version introspiziert werden, bevor wir es zusagen.
+- `query_with_sources()` in [`cognee_io.py`](../kb/cognee_io.py) kombiniert
+  `GRAPH_COMPLETION` für die Antwort mit einem begleitenden `CHUNKS`-Lauf.
+- `_extract_source_ids()` liest `source_id` aus den Chunk-Strings defensiv über
+  mehrere mögliche cognee-Rückgabeformen.
+- `instance_service.py` löst diese IDs über `SourceStore` zu Quellen-Chips auf.
+- `gateway.py` reicht die Quellen durch und bietet den token-geschützten
+  Raw-Endpoint `/api/source/{vault}/{source_id}/raw`.
+- Die PWA zeigt Quellen-Chips im Chat und öffnet lokale Rohtexte über einen
+  Bearer-geschützten Fetch statt per Token in der URL.
 
 ### 2. Spaced Repetition (SM-2) als optionaler Retrieval-Layer
 
-**Status:** nicht prioritär, vorgemerkt für Lernen/Erinnern.
+**Status:** offen, nicht prioritär, vorgemerkt für Lernen/Erinnern.
 (MuninnDB-Engram `01KV0W4YVHMR554N8FB0WEBNGD`.)
 
 Unsere KB ist heute reines **Pull** (Query on demand). BeeMind dreht das um: SM-2
@@ -63,14 +58,14 @@ Snippets mit Frontmatter sind.
 
 ### 3. Content-Creation-Modus
 
-**Status:** Anregung, unbewertet.
+**Status:** offen, Anregung, unbewertet.
 
 Aus mehreren Vault-Treffern einen Entwurf generieren — ein zweiter Query-Modus
 neben der direkten Antwort.
 
 ### 4. Multi-Source-Connectoren erweitern
 
-**Status:** Anregung, teilweise vorhanden.
+**Status:** offen, Anregung, teilweise vorhanden.
 
 BeeMind zieht aus YouTube/X/LinkedIn/PDF. Wir haben YouTube
 ([`fetch_youtube.py`](../kb/fetch_youtube.py)) und Web
