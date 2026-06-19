@@ -27,6 +27,7 @@ import Base from '../layouts/Base.astro';
 
   <script>
     import { api, initVaultSelect, openSourceRaw } from '../lib/api.js';
+    import { safeSourceHref } from '../lib/safe.js';
 
     const vaultSel = document.getElementById('vault');
     const vaultContext = document.getElementById('vault-context');
@@ -137,12 +138,13 @@ import Base from '../layouts/Base.astro';
             for (const src of sources) {
               const icon = TYPE_ICON[src.type] || '📄';
               const displayTitle = src.title || stem(src.raw_md_path) || src.type;
+              const safeHref = safeSourceHref(src.url);
 
-              if (src.url) {
-                // Web / YouTube: externer Link als <a>
+              if (safeHref) {
+                // Web / YouTube: externer Link als <a> (nur http(s), nie javascript:/data:)
                 const chip = document.createElement('a');
                 chip.className = 'source-chip';
-                chip.href = src.url;
+                chip.href = safeHref;
                 chip.target = '_blank';
                 chip.rel = 'noopener noreferrer';
                 // textContent verhindert XSS — Titel/Locator werden nie via innerHTML gesetzt

@@ -37,19 +37,7 @@ const isActive = (href) =>
     <main>
       <slot />
     </main>
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
-      }
-      // Dezenter Hinweis, wenn ohne Token geladen wird (außer auf /settings).
-      (() => {
-        const el = document.getElementById('token-hinweis');
-        if (!el) return;
-        const hasToken = !!localStorage.getItem('kb_token');
-        const onSettings = location.pathname.replace(/\/$/, '') === '/settings';
-        if (!hasToken && !onSettings) el.classList.remove('hidden');
-      })();
-    </script>
+    <script is:inline src="/layout-init.js"></script>
     <style is:global>
       :root {
         --bg: #101418;
