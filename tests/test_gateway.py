@@ -40,7 +40,7 @@ def _fake_async_client(response=None, exc=None, calls=None):
         async def __aexit__(self, *exc_info):
             return False
 
-        async def post(self, url, json=None):
+        async def post(self, url, json=None, headers=None):
             if calls is not None:
                 calls.append((url, json))
             if exc is not None:
@@ -77,6 +77,14 @@ def test_security_headers_present(client):
     assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert r.headers["Referrer-Policy"] == "no-referrer"
     assert r.headers["X-Frame-Options"] == "DENY"
+
+
+def test_response_carries_request_id(client):
+    # Jede Antwort trägt eine Korrelations-ID; eine mitgesendete wird übernommen.
+    r = client.get("/api/vaults", headers=AUTH)
+    assert r.headers.get("X-Request-ID")
+    r2 = client.get("/api/vaults", headers={**AUTH, "X-Request-ID": "fixed-id-123"})
+    assert r2.headers["X-Request-ID"] == "fixed-id-123"
 
 
 def test_health_needs_no_token(client, monkeypatch):

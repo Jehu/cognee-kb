@@ -17,17 +17,26 @@ class QueryProxyError(RuntimeError):
     """Konnte keine Antwort vom Instance Service erhalten."""
 
 
-async def proxy_query(instance_name: str, question: str, datasets: list[str]) -> dict[str, object]:
+async def proxy_query(
+    instance_name: str,
+    question: str,
+    datasets: list[str],
+    request_id: str | None = None,
+) -> dict[str, object]:
     """Liefert die geparste JSON-Antwort des Instance Service (mit 'answer').
+
     Hebt bei Transport-/Status-/Format-/Inhalts-Fehlern QueryProxyError mit
-    lesbarem Text. Das Dict enthält mindestens 'answer' (oft auch 'sources').
+    lesbarem Text. Optional wird eine X-Request-ID mitgegeben (Korrelation
+    Gateway → Instance /query → Logs).
     """
     inst = get_instance(instance_name)
+    headers = {"X-Request-ID": request_id} if request_id else {}
     try:
         async with httpx.AsyncClient(timeout=QUERY_TIMEOUT) as client:
             r = await client.post(
                 f"http://127.0.0.1:{inst.port}/query",
                 json={"question": question, "datasets": datasets},
+                headers=headers,
             )
     except httpx.TransportError:
         raise QueryProxyError(

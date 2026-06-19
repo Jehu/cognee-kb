@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-import sys
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -8,8 +8,11 @@ from typing import Any
 from kb import cognee_io, fetch_web, fetch_youtube, rawstore
 from kb.config import Instance, get_vault
 from kb.fetch_youtube import FetchedDoc
+from kb.logging_setup import setup_logging
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
+
+logger = logging.getLogger("kb.worker")
 
 
 def _fetch(kind: str, payload: dict[str, Any]) -> FetchedDoc:
@@ -41,9 +44,12 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
         # — sonst doppelte Quellen-Chips). mark_done, nicht failed: kein Fehler.
         content_hash = hashlib.sha256(doc.body.encode("utf-8")).hexdigest()
         if store.find_by_hash(content_hash, vault.name) is not None:
-            print(
-                f"[worker] job {job.id}: Duplikat (gleicher Inhalt in {vault.name}) — übersprungen",
-                file=sys.stderr,
+            logger.info(
+                "job=%s vault=%s kind=%s request_id=%s dedup=skip (identischer Body)",
+                job.id,
+                vault.name,
+                job.kind,
+                job.payload.get("request_id"),
             )
             q.mark_done(job.id)
             return True
@@ -85,7 +91,15 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
                 raw_path.unlink()
             except OSError:
                 pass
-        print(f"[worker] job {job.id} failed: {type(e).__name__}: {e}", file=sys.stderr)
+        logger.error(
+            "job=%s vault=%s kind=%s request_id=%s failed=%s: %s",
+            job.id,
+            job.vault,
+            job.kind,
+            job.payload.get("request_id"),
+            type(e).__name__,
+            e,
+        )
         q.mark_failed(job.id, f"{type(e).__name__}: {e}")
     return True
 
@@ -106,6 +120,7 @@ def process_one(
 def run_forever(
     instance: Instance, q: JobQueue, store: SourceStore, poll_seconds: float = 5.0
 ) -> None:
+    setup_logging()
     cognee_io.load_instance_env(instance)
     q.recover_stale()  # genau ein Worker pro Instanz — verwaiste Jobs gefahrlos zurücksetzen
     # EIN Loop für alle Jobs — cognee cachet loop-gebundene Ressourcen
@@ -131,6 +146,7 @@ async def run_forever_async(
     asyncio.CancelledError abbrechbar: process_one_async schluckt die
     Cancellation nicht, await asyncio.sleep reicht sie ebenfalls durch.
     """
+    setup_logging()
     while True:
         if not await process_one_async(instance, q, store):
             await asyncio.sleep(poll_seconds)

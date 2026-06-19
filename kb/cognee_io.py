@@ -10,15 +10,17 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
   Key 'search_result' (empirisch, Phase-0-Lauf). `_render` behandelt beides.
 """
 
+import logging
 import os
 import re
-import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from kb.config import Instance
 from kb.envutil import strip_quotes
 from kb.guard import assert_instance_env
+
+logger = logging.getLogger("kb.cognee_io")
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
 _SOURCE_ID_RE = re.compile(
@@ -156,6 +158,6 @@ async def query_with_sources(
         # CHUNKS ist nur die Herkunfts-Extraktion. Schlägt sie fehl, liefern wir
         # die Antwort ohne Quellen-Chips statt die ganze Query sterben zu lassen
         # (sonst 502 trotz fertiger Antwort).
-        print(f"[cognee_io] CHUNKS-Suche fehlgeschlagen: {type(e).__name__}: {e}", file=sys.stderr)
+        logger.warning("CHUNKS-Suche fehlgeschlagen: %s: %s", type(e).__name__, e)
         source_ids = []
     return answer, source_ids

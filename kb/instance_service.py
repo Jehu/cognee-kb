@@ -6,17 +6,20 @@ Bindet nur an 127.0.0.1, kein Token (siehe Phase-2-Plan).
 """
 
 import asyncio
-import sys
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from pydantic import BaseModel
 
 from kb import cognee_io, guard, worker
 from kb.config import get_instance
+from kb.logging_setup import setup_logging
 from kb.queue import JobQueue
 from kb.sources import SourceStore
+
+logger = logging.getLogger("kb.instance")
 
 
 class QueryBody(BaseModel):
@@ -25,15 +28,17 @@ class QueryBody(BaseModel):
 
 
 def _log_worker_death(task: asyncio.Task[None]) -> None:
-    """Macht einen unerwartet gestorbenen Worker-Task auf stderr sichtbar."""
+    """Macht einen unerwartet gestorbenen Worker-Task im Log sichtbar."""
     if task.cancelled():
         return  # regulärer Shutdown
     exc = task.exception()
     if exc is not None:
-        print(f"[instance] Worker-Task gestorben: {type(exc).__name__}: {exc}", file=sys.stderr)
+        logger.error("Worker-Task gestorben: %s: %s", type(exc).__name__, exc)
 
 
 def create_app(instance_name: str) -> FastAPI:
+    setup_logging()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         inst = get_instance(instance_name)
@@ -74,7 +79,15 @@ def create_app(instance_name: str) -> FastAPI:
     # Event-Loops — dieselbe sqlite3-Connection ist so threadsicher nutzbar.
 
     @app.post("/query")
-    async def query(body: QueryBody) -> dict[str, object]:
+    async def query(
+        body: QueryBody, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
+    ) -> dict[str, object]:
+        logger.info(
+            "query instance=%s datasets=%s request_id=%s",
+            instance_name,
+            body.datasets,
+            x_request_id,
+        )
         answer, source_ids = await cognee_io.query_with_sources(
             app.state.inst, body.question, datasets=body.datasets
         )
