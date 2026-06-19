@@ -12,6 +12,7 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from kb.config import Instance
@@ -140,9 +141,18 @@ async def query_with_sources(
     )
     answer = "\n".join(_render(r) for r in results)
 
-    chunk_results = await cognee.search(
-        query_type=SearchType.CHUNKS,
-        query_text=question,
-        datasets=datasets,
-    )
-    return answer, _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]
+    try:
+        chunk_results = await cognee.search(
+            query_type=SearchType.CHUNKS,
+            query_text=question,
+            datasets=datasets,
+        )
+        source_ids = _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]
+    except Exception as e:  # noqa: BLE001 — Quellen sind Komfort, Antwort ist Pflicht
+        # CHUNKS ist nur die Herkunfts-Extraktion. Schlägt sie fehl, liefern wir
+        # die Antwort ohne Quellen-Chips statt die ganze Query sterben zu lassen
+        # (sonst 502 trotz fertiger Antwort).
+        print(f"[cognee_io] CHUNKS-Suche fehlgeschlagen: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        source_ids = []
+    return answer, source_ids

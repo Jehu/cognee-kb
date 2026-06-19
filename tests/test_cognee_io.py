@@ -121,6 +121,28 @@ def test_query_with_sources_returns_only_best_related_source(monkeypatch):
     assert calls[1]["query_type"] == _SearchType.CHUNKS
 
 
+def test_query_with_sources_returns_answer_when_chunks_fails(monkeypatch):
+    # GRAPH_COMPLETION liefert die Antwort; schlägt der zweite CHUNKS-Lauf fehl,
+    # muss dennoch (answer, []) zurückkommen — nicht 502 bei fertiger Antwort.
+    class _SearchType:
+        GRAPH_COMPLETION = "graph"
+        CHUNKS = "chunks"
+
+    async def search(**kwargs):
+        if kwargs["query_type"] == _SearchType.GRAPH_COMPLETION:
+            return [_StubSearchResult("Antwort")]
+        raise RuntimeError("chunks broken")
+
+    fake_cognee = SimpleNamespace(search=search, SearchType=_SearchType)
+    monkeypatch.setitem(sys.modules, "cognee", fake_cognee)
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+
+    answer, source_ids = asyncio.run(
+        query_with_sources(get_instance("local"), "Frage?", ["privat"]))
+    assert answer == "Antwort"
+    assert source_ids == []
+
+
 def test_iter_strings_plain_string():
     assert list(_iter_strings("hallo")) == ["hallo"]
 
