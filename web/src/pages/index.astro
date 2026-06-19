@@ -33,6 +33,7 @@ import Base from '../layouts/Base.astro';
 
   <script>
     import { api, initVaultSelect, loadNodeSets } from '../lib/api.js';
+    import { makeToken, poll as pollJob } from '../lib/poll.js';
 
     const form = document.getElementById('ingest-form');
     const vaultSel = document.getElementById('vault');
@@ -43,6 +44,9 @@ import Base from '../layouts/Base.astro';
     const submit = document.getElementById('submit');
     let vaultReady = false;
     let vaultState = null;
+    // Aktiver Poll-Token: ein neuer Submit cancelt den vorherigen, damit zwei
+    // Polls nicht denselben Status-Sink (#result/#job-steps) überschreiben.
+    let activeToken = null;
 
     // Submit erst freigeben, wenn die Vault-Auswahl befüllt ist —
     // sonst ginge ein Submit mit leerem Vault raus.
@@ -130,31 +134,16 @@ import Base from '../layouts/Base.astro';
       );
     }
 
-    async function poll(vault, jobId) {
-      const maxTries = 40; // 40 × 3 s ≈ 2 min
-      for (let i = 0; i < maxTries; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        let job;
-        try {
-          job = await api(`/api/jobs/${encodeURIComponent(vault)}/${jobId}`);
-        } catch (e) {
-          show(`Job #${jobId}: Statusabfrage fehlgeschlagen — ${e.message}`, 'error');
-          continue;
-        }
-        if (job.status === 'done') {
-          setStep('done');
-          show(`Job #${jobId}: fertig ✓`, 'ok');
-          return;
-        }
-        if (job.status === 'failed') {
-          setStep('failed');
-          show(`Job #${jobId}: fehlgeschlagen — ${job.error || 'unbekannter Fehler'}`, 'error');
-          return;
-        }
-        setStep('running');
-        show(`Job #${jobId}: ${job.status}…`);
-      }
-      show(`Job #${jobId}: Zeitlimit erreicht — Status später prüfen.`, 'error');
+    function startPoll(vault, jobId) {
+      // Vorherigen Poll canceln, damit zwei Läufe nicht denselben Sink überschreiben.
+      if (activeToken) activeToken.cancelled = true;
+      const token = makeToken();
+      activeToken = token;
+      pollJob({
+        vault, jobId, token,
+        fetchJob: (v, id) => api(`/api/jobs/${encodeURIComponent(v)}/${id}`),
+        sink: { show, setStep },
+      });
     }
 
     form.addEventListener('submit', async (ev) => {
@@ -179,7 +168,7 @@ import Base from '../layouts/Base.astro';
         setStep('running');
         show(`Job #${res.job_id} angenommen (${res.kind}). Warte auf Verarbeitung…`);
         document.getElementById('content').value = '';
-        poll(vault, res.job_id);
+        startPoll(vault, res.job_id);
       } catch (e) {
         show(e.message, 'error');
       } finally {
