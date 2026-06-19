@@ -61,6 +61,12 @@ def create_app(instance_name: str) -> FastAPI:
                 pass
             except Exception:  # noqa: BLE001 — Tod bereits via Callback geloggt
                 pass
+            # SQLite-Connections sauber schließen (WAL-Checkpoint), nachdem der
+            # Worker-Task beendet ist — nur aufräumen, was wirklich existiert.
+            for attr in ("q", "store"):
+                obj = getattr(app.state, attr, None)
+                if obj is not None:
+                    obj.close()
 
     app = FastAPI(title=f"kb-instance-{instance_name}", lifespan=lifespan)
 

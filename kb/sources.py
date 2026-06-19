@@ -85,6 +85,10 @@ class SourceStore:
             except sqlite3.OperationalError:
                 pass
 
+    def close(self) -> None:
+        """Schließt die Connection (sauberer Shutdown des Instance Service)."""
+        self.conn.close()
+
     def insert(self, r: SourceRecord) -> None:
         # Explizite Spaltennamen notwendig: ALTER TABLE hängt title ans Ende,
         # Positions-INSERT würde nach Schema-Erweiterung falsch greifen.

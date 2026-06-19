@@ -171,3 +171,20 @@ def test_worker_task_started_and_cancelled_on_shutdown(inst, monkeypatch):
     instance, q, store = state["args"]
     assert instance is inst
     assert q is not None and store is not None
+
+
+def test_lifespan_closes_sqlite_connections(inst):
+    # Nach dem Shutdown müssen die SQLite-Connections des Instance Service
+    # geschlossen sein (sonst u. U. uncheckpointierter WAL bei hohem Schreibdruck).
+    import sqlite3
+
+    app = instance_service.create_app("local")
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        q = app.state.q
+        store = app.state.store
+    # Nach dem `with`-Exit (Shutdown) sind die Connections zu:
+    with pytest.raises(sqlite3.ProgrammingError):
+        q.conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        store.conn.execute("SELECT 1")
