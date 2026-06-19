@@ -17,3 +17,7 @@ raw/
 # Tool-Artefakte (Graphify) — kein Code
 graphify-out/
 .graphify_*
+
+# Agent-Skills (z. B. vendored shadcn/improve) — lokales Tooling, kein KB-Code
+.agents/
+skills-lock.json
