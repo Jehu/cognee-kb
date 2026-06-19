@@ -31,6 +31,8 @@ async def process_one_async(instance: Instance | None, q: JobQueue,
     job = q.claim_next()
     if job is None:
         return False
+    record_id = None  # für Cleanup bei Ingest-Fehlern (siehe except-Block)
+    raw_path = None
     try:
         vault = get_vault(job.vault)
         # _fetch ist blockierendes I/O (HTTP, Datei) — nicht den Loop blockieren
@@ -49,7 +51,9 @@ async def process_one_async(instance: Instance | None, q: JobQueue,
             locator=doc.locator, vault=vault.name, raw_md_path="",
             title=doc.title, content_hash=content_hash)
         path, record = rawstore.write_raw(vault.raw_dir, doc.title, doc.body, record)
+        raw_path = path
         store.insert(record)
+        record_id = record.id
         # Stufe 1.5: node_set fällt per Default auf record.id zurück, damit jedes
         # Dokument eine deterministische belongs_to_set-Kante trägt (Vorbereitung
         # für späteren CYPHER-Herkunfts-Fallback). Ändert den Stufe-1-Pfad nicht.
@@ -61,6 +65,16 @@ async def process_one_async(instance: Instance | None, q: JobQueue,
     except Exception as e:  # noqa: BLE001 — Worker darf nie sterben
         # Fängt nur Job-Fehler: asyncio.CancelledError ist BaseException und
         # läuft hier durch — die Loop-Cancellation bleibt damit intakt.
+        # Cleanup: Source-Record + Rohdatei wurden VOR cognee angelegt. Ohne
+        # Cleanup würde der Dedup-Check (find_by_hash ohne Status-Filter) diesen
+        # Inhalt beim nächsten Versuch überspringen — stummer Datenverlust.
+        if record_id is not None:
+            store.delete(record_id)
+        if raw_path is not None:
+            try:
+                raw_path.unlink()
+            except OSError:
+                pass
         print(f"[worker] job {job.id} failed: {type(e).__name__}: {e}",
               file=sys.stderr)
         q.mark_failed(job.id, f"{type(e).__name__}: {e}")

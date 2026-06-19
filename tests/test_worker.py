@@ -170,3 +170,39 @@ async def test_process_one_skips_duplicate_body(tmp_path):
     assert store.conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
     assert len(list((tmp_path / "raw").glob("*.md"))) == 1
     assert ingest_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_process_one_cleans_up_on_ingest_failure_then_reingests(tmp_path):
+    # Scheitert cognify NACH dem Anlegen von Source-Record + Rohdatei, muss der
+    # Worker beides aufräumen — sonst vergiftet der Dedup-Check (find_by_hash
+    # ohne Status-Filter) diesen Inhalt dauerhaft: ein erneuter Ingest würde
+    # still als Duplikat übersprungen (stummer Datenverlust).
+    import hashlib
+
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    text = "Wichtiger Inhalt, der beim ersten Versuch scheitert."
+    j1 = q.enqueue("privat", "snippet", {"text": text, "title": "Notiz"})
+
+    failing = AsyncMock(side_effect=RuntimeError("ollama down"))
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.cognee_io.ingest", failing):
+        worked = await process_one_async(instance=None, q=q, store=store)
+    assert worked is True
+    assert q.status(j1) == "failed"
+    # Kein Ghost-Record, keine verwaiste Rohdatei.
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert store.find_by_hash(h, "privat") is None
+    assert store.conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 0
+    assert len(list((tmp_path / "raw").glob("*.md"))) == 0
+
+    # Erneuter Ingest desselben Inhalts läuft wirklich neu (kein Dedup-Skip).
+    j2 = q.enqueue("privat", "snippet", {"text": text, "title": "Notiz"})
+    succeeding = AsyncMock()
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), \
+         patch("kb.cognee_io.ingest", succeeding):
+        worked = await process_one_async(instance=None, q=q, store=store)
+    assert worked is True
+    assert q.status(j2) == "done"
+    succeeding.assert_awaited_once()

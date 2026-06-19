@@ -104,3 +104,8 @@ class SourceStore:
             f"SELECT {self._COLS} FROM sources WHERE content_hash=? AND vault=? LIMIT 1",
             (content_hash, vault)).fetchone()
         return SourceRecord(*row) if row else None
+
+    def delete(self, source_id: str) -> None:
+        """Löscht einen Source-Record (Cleanup bei fehlgeschlagenem Ingest)."""
+        self.conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
+        self.conn.commit()
