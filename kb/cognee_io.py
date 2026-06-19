@@ -19,6 +19,7 @@ from kb.guard import assert_instance_env
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
 _SOURCE_ID_RE = re.compile(r"source_id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+_MAX_RELATED_SOURCES = 1
 
 
 def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
@@ -144,4 +145,4 @@ async def query_with_sources(
         query_text=question,
         datasets=datasets,
     )
-    return answer, _extract_source_ids(chunk_results)
+    return answer, _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]

@@ -1,4 +1,14 @@
-from kb.cognee_io import _extract_source_ids, _iter_strings, _render, load_instance_env
+import asyncio
+import sys
+from types import SimpleNamespace
+
+from kb.cognee_io import (
+    _extract_source_ids,
+    _iter_strings,
+    _render,
+    load_instance_env,
+    query_with_sources,
+)
 from kb.config import get_instance
 
 
@@ -80,6 +90,35 @@ def test_extract_source_ids_deduplicates_same_source():
 def test_extract_source_ids_no_source_id():
     results = [{"text": "Kein Frontmatter hier, nur plain text."}]
     assert _extract_source_ids(results) == []
+
+
+def test_query_with_sources_returns_only_best_related_source(monkeypatch):
+    calls = []
+    other_uuid = "bbbbbbbb-1111-2222-3333-444444444444"
+
+    class _SearchType:
+        GRAPH_COMPLETION = "graph"
+        CHUNKS = "chunks"
+
+    async def search(**kwargs):
+        calls.append(kwargs)
+        if kwargs["query_type"] == _SearchType.GRAPH_COMPLETION:
+            return [_StubSearchResult("Antwort")]
+        return [
+            {"text": _FM},
+            {"text": f"---\nsource_id: {other_uuid}\ntype: web\n---\nIrrelevant"},
+        ]
+
+    fake_cognee = SimpleNamespace(search=search, SearchType=_SearchType)
+    monkeypatch.setitem(sys.modules, "cognee", fake_cognee)
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+
+    answer, source_ids = asyncio.run(
+        query_with_sources(get_instance("local"), "Frage?", ["privat"]))
+
+    assert answer == "Antwort"
+    assert source_ids == [_UUID]
+    assert calls[1]["query_type"] == _SearchType.CHUNKS
 
 
 def test_iter_strings_plain_string():
