@@ -35,6 +35,9 @@ dev = [
 # cognee 0.3.9 erlaubt mistralai>=1.9.10 ohne Obergrenze, aber sein
 # instructor-Pin (1.15.x) braucht mistralai<2 — sonst bricht `import cognee`.
 constraint-dependencies = ["mistralai<2.0.0"]
+# Transitive Deps, die upstream (cognee/fastapi) zu niedrig pinnen, aber CVE-Fixes
+# enthalten — hier nach oben erzwingen (kb nutzt sie nicht direkt, s. Audit-Job):
+override-dependencies = ["python-multipart>=0.0.31", "pyjwt>=2.13", "pillow>=12.2", "fastapi-users>=15.0.2"]
 
 [build-system]
 requires = ["uv_build>=0.7.19,<0.9.0"]
