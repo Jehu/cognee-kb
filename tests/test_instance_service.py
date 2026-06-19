@@ -12,10 +12,14 @@ from kb.sources import SourceRecord, SourceStore
 
 
 def make_instance(tmp_path) -> Instance:
-    return Instance(name="local", env_file=tmp_path / ".env.local",
-                    allowed_llm_providers=("ollama",),
-                    expected_embedding_provider="fastembed",
-                    var_dir=tmp_path, port=8801)
+    return Instance(
+        name="local",
+        env_file=tmp_path / ".env.local",
+        allowed_llm_providers=("ollama",),
+        expected_embedding_provider="fastembed",
+        var_dir=tmp_path,
+        port=8801,
+    )
 
 
 async def _idle_worker(instance, q, store, poll_seconds=5.0):
@@ -36,16 +40,18 @@ def inst(tmp_path, monkeypatch):
 
 # --- /health ---
 
+
 def test_health_reports_queue_counts(inst, tmp_path):
     with TestClient(instance_service.create_app("local")) as client:
         r = client.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"instance": "local", "queue": {
-            "pending": 0, "running": 0, "done": 0, "failed": 0},
-            "worker": "ok"}
+        assert r.json() == {
+            "instance": "local",
+            "queue": {"pending": 0, "running": 0, "done": 0, "failed": 0},
+            "worker": "ok",
+        }
         # Job enqueuen (eigene Connection, WAL) → pending=1
-        JobQueue(tmp_path / "queue.db").enqueue(
-            "privat", "snippet", {"text": "x"})
+        JobQueue(tmp_path / "queue.db").enqueue("privat", "snippet", {"text": "x"})
         r = client.get("/health")
         assert r.json()["queue"]["pending"] == 1
 
@@ -67,12 +73,12 @@ def test_health_reports_dead_worker(inst, monkeypatch, capsys):
 
 # --- /query ---
 
+
 def test_query_calls_cognee_io(inst, monkeypatch):
     query_mock = AsyncMock(return_value=("Antwort!", []))
     monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
     with TestClient(instance_service.create_app("local")) as client:
-        r = client.post("/query", json={
-            "question": "Was ist X?", "datasets": ["privat"]})
+        r = client.post("/query", json={"question": "Was ist X?", "datasets": ["privat"]})
     assert r.status_code == 200
     assert r.json() == {"answer": "Antwort!", "sources": []}
     query_mock.assert_awaited_once_with(inst, "Was ist X?", datasets=["privat"])
@@ -100,20 +106,21 @@ def test_query_returns_sources(inst, tmp_path, monkeypatch):
     SourceStore(tmp_path / "sources.db").insert(rec)
 
     with TestClient(instance_service.create_app("local")) as client:
-        r = client.post("/query", json={
-            "question": "Was?", "datasets": ["privat"]})
+        r = client.post("/query", json={"question": "Was?", "datasets": ["privat"]})
 
     assert r.status_code == 200
     body = r.json()
     assert body["answer"] == "A"
-    assert body["sources"] == [{
-        "source_id": "sid1",
-        "type": "snippet",
-        "url": None,
-        "locator": None,
-        "raw_md_path": "raw/privat/x.md",
-        "title": "Testtitel",
-    }]
+    assert body["sources"] == [
+        {
+            "source_id": "sid1",
+            "type": "snippet",
+            "url": None,
+            "locator": None,
+            "raw_md_path": "raw/privat/x.md",
+            "title": "Testtitel",
+        }
+    ]
 
 
 def test_query_skips_unknown_source_ids(inst, monkeypatch):
@@ -127,6 +134,7 @@ def test_query_skips_unknown_source_ids(inst, monkeypatch):
 
 
 # --- Lifespan ---
+
 
 def test_guard_failure_aborts_startup(tmp_path, monkeypatch):
     instance = make_instance(tmp_path)

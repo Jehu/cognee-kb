@@ -1,4 +1,5 @@
 import pytest
+
 from kb.config import get_instance
 from kb.guard import EnvGuardError, assert_instance_env
 

@@ -6,11 +6,12 @@ SQLite-Queue (WAL), Queries werden per HTTP an den Instance Service geproxyt.
 
 import os
 import secrets
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,8 +26,8 @@ from kb.config import (
     queue_path,
     sources_path,
 )
-from kb.queue import JobQueue
 from kb.query_proxy import QueryProxyError, proxy_query
+from kb.queue import JobQueue
 from kb.sources import SourceStore
 
 HEALTH_TIMEOUT = 2.0
@@ -73,7 +74,9 @@ def create_app() -> FastAPI:
     api = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
     @app.middleware("http")
-    async def security_headers(request, call_next):
+    async def security_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         # Defense-in-depth: das Bearer-Token liegt im PWA-localStorage. Ein
         # künftiges innerHTML/set:html würde ohne CSP sofort den Token
         # exfiltrieren — CSP macht daraus einen containerten Bruch.
@@ -97,7 +100,7 @@ def create_app() -> FastAPI:
         return response
 
     @api.post("/ingest", status_code=202)
-    def ingest(body: IngestBody) -> dict:
+    def ingest(body: IngestBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         # Kein Datei-Pfad-Zweig wie im CLI — HTTP-Clients liefern keine lokalen Pfade.
         kind, payload = build_payload(body.content)
@@ -109,17 +112,16 @@ def create_app() -> FastAPI:
         return {"job_id": jid, "vault": v.name, "kind": kind}
 
     @api.post("/query")
-    async def query(body: QueryBody) -> dict:
+    async def query(body: QueryBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         try:
             data = await proxy_query(v.instance, body.question, [v.dataset])
         except QueryProxyError as e:
             raise HTTPException(502, str(e)) from None
-        return {"vault": v.name, "answer": data["answer"],
-                "sources": data.get("sources", [])}
+        return {"vault": v.name, "answer": data["answer"], "sources": data.get("sources", [])}
 
     @api.get("/source/{vault}/{source_id}/raw")
-    def source_raw(vault: str, source_id: str):
+    def source_raw(vault: str, source_id: str) -> FileResponse:
         v = _resolve_vault(vault)
         # SourceStore pro Request — wie JobQueue bei /ingest: sqlite3-Connections
         # sind thread-gebunden, uvicorn fährt den sync-Handler im Thread-Pool.
@@ -142,7 +144,7 @@ def create_app() -> FastAPI:
         return FileResponse(p, media_type="text/markdown")
 
     @api.get("/jobs/{vault}/{job_id}")
-    def job_info(vault: str, job_id: int) -> dict:
+    def job_info(vault: str, job_id: int) -> dict[str, object]:
         v = _resolve_vault(vault)
         q = JobQueue(queue_path(v.instance))
         info = q.info(job_id)
@@ -153,11 +155,11 @@ def create_app() -> FastAPI:
         return {k: info[k] for k in ("id", "status", "kind", "error", "created_at")}
 
     @api.get("/vaults")
-    def vaults() -> list[dict]:
+    def vaults() -> list[dict[str, str]]:
         return [{"name": v.name, "instance": v.instance} for v in VAULTS.values()]
 
     @api.get("/node-sets/{vault}")
-    def node_sets(vault: str) -> dict:
+    def node_sets(vault: str) -> dict[str, object]:
         v = _resolve_vault(vault)
         q = JobQueue(queue_path(v.instance))
         return {"vault": v.name, "node_sets": q.node_sets(v.name)}
@@ -165,7 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(api)
 
     @app.get("/api/health")  # bewusst ohne Token (Monitoring)
-    async def health() -> dict:
+    async def health() -> dict[str, object]:
         instances = {}
         async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT) as client:
             for name, inst in INSTANCES.items():

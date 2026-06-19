@@ -1,10 +1,11 @@
 import pytest
+
 from kb.config import (
     CONFIG_FILE,
     INSTANCES,
+    VAULTS,
     ConfigError,
     UnknownVaultError,
-    VAULTS,
     get_instance,
     get_vault,
 )
@@ -57,7 +58,7 @@ def test_local_instance_env_and_guard_expectation():
     inst = get_instance("local")
     assert inst.env_file.name == ".env.local"
     assert inst.var_dir.name == "local"
-    assert inst.allowed_llm_providers == ("ollama",)   # local: nur lokal
+    assert inst.allowed_llm_providers == ("ollama",)  # local: nur lokal
     assert inst.expected_embedding_provider == "fastembed"
 
 
@@ -65,7 +66,7 @@ def test_cloud_instance_env_and_guard_expectation():
     inst = get_instance("cloud")
     assert inst.env_file.name == ".env.cloud"
     assert inst.var_dir.name == "cloud"
-    assert inst.allowed_llm_providers == ("custom",)   # cloud: Cloud-LLM
+    assert inst.allowed_llm_providers == ("custom",)  # cloud: Cloud-LLM
     assert inst.expected_embedding_provider == "fastembed"
 
 

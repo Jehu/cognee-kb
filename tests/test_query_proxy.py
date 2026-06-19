@@ -40,22 +40,23 @@ class _Resp:
 
 
 def test_success_returns_dict(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _client(response=_Resp(payload={"answer": "42", "sources": []})))
+    monkeypatch.setattr(
+        query_proxy.httpx,
+        "AsyncClient",
+        _client(response=_Resp(payload={"answer": "42", "sources": []})),
+    )
     data = asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
     assert data == {"answer": "42", "sources": []}
 
 
 def test_transport_error_raises(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _client(exc=httpx.ConnectError("zu")))
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _client(exc=httpx.ConnectError("zu")))
     with pytest.raises(QueryProxyError, match="nicht erreichbar"):
         asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
 
 
 def test_non_200_raises(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _client(response=_Resp(status_code=500)))
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _client(response=_Resp(status_code=500)))
     with pytest.raises(QueryProxyError, match="500"):
         asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
 
@@ -69,7 +70,8 @@ def test_non_json_200_raises(monkeypatch):
 
 
 def test_missing_answer_raises(monkeypatch):
-    monkeypatch.setattr(query_proxy.httpx, "AsyncClient",
-                        _client(response=_Resp(payload={"error": "boom"})))
+    monkeypatch.setattr(
+        query_proxy.httpx, "AsyncClient", _client(response=_Resp(payload={"error": "boom"}))
+    )
     with pytest.raises(QueryProxyError, match="keine Antwort"):
         asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))

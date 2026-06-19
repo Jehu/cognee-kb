@@ -13,13 +13,16 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
 import os
 import re
 import sys
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from kb.config import Instance
 from kb.guard import assert_instance_env
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
-_SOURCE_ID_RE = re.compile(r"source_id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+_SOURCE_ID_RE = re.compile(
+    r"source_id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
 _MAX_RELATED_SOURCES = 1
 
 
@@ -69,7 +72,7 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
     return "\n".join(_render(r) for r in results)
 
 
-def _render(result) -> str:
+def _render(result: object) -> str:
     """SearchResult.search_result extrahieren (Objekt ODER dict); Listen flach joinen."""
     if isinstance(result, dict):
         payload = result.get("search_result", result)
@@ -80,7 +83,7 @@ def _render(result) -> str:
     return str(payload)
 
 
-def _iter_strings(obj, depth: int = 0):
+def _iter_strings(obj: object, depth: int = 0) -> Iterator[str]:
     """Rekursiver Walker über alle String-Blätter eines Cognee-Suchergebnisses.
 
     Defensiv implementiert weil die exakte Shape von cognee.search(CHUNKS)
@@ -108,7 +111,7 @@ def _iter_strings(obj, depth: int = 0):
             yield from _iter_strings(val, depth + 1)
 
 
-def _extract_source_ids(results) -> list[str]:
+def _extract_source_ids(results: Iterable[object]) -> list[str]:
     """Extrahiert deduplizierte source_ids aus CHUNKS-Suchergebnissen.
 
     Jedes Ergebnis kann verschiedene Shapes haben (siehe _iter_strings),
@@ -152,7 +155,6 @@ async def query_with_sources(
         # CHUNKS ist nur die Herkunfts-Extraktion. Schlägt sie fehl, liefern wir
         # die Antwort ohne Quellen-Chips statt die ganze Query sterben zu lassen
         # (sonst 502 trotz fertiger Antwort).
-        print(f"[cognee_io] CHUNKS-Suche fehlgeschlagen: {type(e).__name__}: {e}",
-              file=sys.stderr)
+        print(f"[cognee_io] CHUNKS-Suche fehlgeschlagen: {type(e).__name__}: {e}", file=sys.stderr)
         source_ids = []
     return answer, source_ids

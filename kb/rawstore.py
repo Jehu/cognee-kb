@@ -5,8 +5,9 @@ from pathlib import Path
 
 from kb.sources import SourceRecord
 
-UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
-                         "Ä": "ae", "Ö": "oe", "Ü": "ue"})
+UMLAUTS = str.maketrans(
+    {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss", "Ä": "ae", "Ö": "oe", "Ü": "ue"}
+)
 
 
 def slugify(text: str) -> str:
@@ -21,8 +22,9 @@ def _clean_heading(title: str) -> str:
     return " ".join(title.split()) or "Ohne Titel"
 
 
-def write_raw(raw_dir: Path, title: str, body: str,
-              record: SourceRecord) -> tuple[Path, SourceRecord]:
+def write_raw(
+    raw_dir: Path, title: str, body: str, record: SourceRecord
+) -> tuple[Path, SourceRecord]:
     raw_dir.mkdir(parents=True, exist_ok=True)
     title = _clean_heading(title)
     stem = f"{date.today().isoformat()}-{slugify(title)[:60]}"

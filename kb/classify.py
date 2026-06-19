@@ -1,14 +1,14 @@
 import re
 from dataclasses import dataclass
+from typing import Any
 
-YOUTUBE_RE = re.compile(
-    r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([\w-]{11})")
+YOUTUBE_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([\w-]{11})")
 URL_RE = re.compile(r"^https?://\S+$")
 
 
 @dataclass(frozen=True)
 class Classified:
-    kind: str               # youtube | web | snippet
+    kind: str  # youtube | web | snippet
     video_id: str | None = None
 
 
@@ -52,7 +52,7 @@ def snippet_title(text: str) -> str:
     return _truncate_words(heading or first or "Snippet", 60)
 
 
-def build_payload(content: str) -> tuple[str, dict]:
+def build_payload(content: str) -> tuple[str, dict[str, Any]]:
     """Klassifiziert freien Input und baut das Job-Payload (ohne node_set/Datei).
 
     Geteilt von Gateway und CLI, damit die Ableitung (inkl. Snippet-Titel) an

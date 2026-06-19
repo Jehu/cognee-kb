@@ -1,8 +1,9 @@
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -13,10 +14,10 @@ class _QuotingDumper(yaml.SafeDumper):
     der Frontmatter-Roundtrip wäre mehrdeutig. Nicht zu safe_dump vereinfachen!"""
 
 
-def _str_representer(dumper, data):
-    if ':' in data:
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style="'")
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+def _str_representer(dumper: _QuotingDumper, data: str) -> yaml.Node:
+    if ":" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="'")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
 _QuotingDumper.add_representer(str, _str_representer)
@@ -41,26 +42,31 @@ CREATE TABLE IF NOT EXISTS sources (
 @dataclass(frozen=True)
 class SourceRecord:
     id: str
-    type: str          # youtube | web | snippet | file
+    type: str  # youtube | web | snippet | file
     url: str | None
     video_id: str | None
     locator: str | None
-    fetched_at: str    # ISO-8601 UTC
+    fetched_at: str  # ISO-8601 UTC
     vault: str
     raw_md_path: str
-    title: str | None = None         # Optional: frozen dataclass verlangt Default-Felder zuletzt
+    title: str | None = None  # Optional: frozen dataclass verlangt Default-Felder zuletzt
     content_hash: str | None = None  # sha256 des Bodys — für Ingest-Dedup pro Vault
 
     @classmethod
-    def new(cls, **kwargs) -> "SourceRecord":
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def new(cls, **kwargs: Any) -> "SourceRecord":
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         return cls(id=str(uuid.uuid4()), fetched_at=now, **kwargs)
 
     def frontmatter(self) -> str:
         data = asdict(self)
         data["source_id"] = data.pop("id")
-        body = yaml.dump(data, Dumper=_QuotingDumper, sort_keys=False, allow_unicode=True,
-                         default_flow_style=False)
+        body = yaml.dump(
+            data,
+            Dumper=_QuotingDumper,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
         return f"---\n{body}---\n"
 
 
@@ -86,8 +92,18 @@ class SourceStore:
             "INSERT INTO sources "
             "(id,type,url,video_id,locator,fetched_at,vault,raw_md_path,title,content_hash) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (r.id, r.type, r.url, r.video_id, r.locator, r.fetched_at,
-             r.vault, r.raw_md_path, r.title, r.content_hash),
+            (
+                r.id,
+                r.type,
+                r.url,
+                r.video_id,
+                r.locator,
+                r.fetched_at,
+                r.vault,
+                r.raw_md_path,
+                r.title,
+                r.content_hash,
+            ),
         )
         self.conn.commit()
 
@@ -95,14 +111,16 @@ class SourceStore:
 
     def get(self, source_id: str) -> SourceRecord | None:
         row = self.conn.execute(
-            f"SELECT {self._COLS} FROM sources WHERE id=?", (source_id,)).fetchone()
+            f"SELECT {self._COLS} FROM sources WHERE id=?", (source_id,)
+        ).fetchone()
         return SourceRecord(*row) if row else None
 
     def find_by_hash(self, content_hash: str, vault: str) -> SourceRecord | None:
         """Erste Quelle mit gleichem Body-Hash im selben Vault — für Ingest-Dedup."""
         row = self.conn.execute(
             f"SELECT {self._COLS} FROM sources WHERE content_hash=? AND vault=? LIMIT 1",
-            (content_hash, vault)).fetchone()
+            (content_hash, vault),
+        ).fetchone()
         return SourceRecord(*row) if row else None
 
     def delete(self, source_id: str) -> None:

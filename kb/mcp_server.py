@@ -10,11 +10,16 @@ Startwege (primär: CLI):
 """
 
 import os
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from kb.classify import build_payload
 from kb.config import VAULTS, get_instance, queue_path
 from kb.query_proxy import QueryProxyError, proxy_query
 from kb.queue import JobQueue
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 
 def _tool_name(vault_name: str) -> str:
@@ -22,7 +27,7 @@ def _tool_name(vault_name: str) -> str:
     return "search_" + vault_name.replace("-", "_")
 
 
-def build_server(instance_name: str):
+def build_server(instance_name: str) -> "FastMCP":
     """Baut den FastMCP-Server einer Instanz mit dynamisch registrierten Tools."""
     from mcp.server.fastmcp import FastMCP
 
@@ -36,19 +41,22 @@ def build_server(instance_name: str):
             data = await proxy_query(instance_name, question, datasets)
         except QueryProxyError as e:
             return str(e)
-        return data["answer"]
+        return str(data["answer"])
 
     # --- pro Vault ein search-Tool (Closure über vault sauber gebunden) ---
     for v in vaults:
-        def make_search(dataset: str):
+
+        def make_search(dataset: str) -> Callable[[str], Awaitable[str]]:
             async def search(question: str) -> str:
                 return await _query(question, [dataset])
+
             return search
 
         mcp.add_tool(
             make_search(v.dataset),
             name=_tool_name(v.name),
-            description=f"Frage an den Vault '{v.name}' (GRAPH_COMPLETION).")
+            description=f"Frage an den Vault '{v.name}' (GRAPH_COMPLETION).",
+        )
 
     # --- search_all nur bei >1 Vault ---
     if len(vaults) > 1:
@@ -62,14 +70,17 @@ def build_server(instance_name: str):
             search_all,
             name="search_all",
             description="Frage über alle Vaults dieser Instanz "
-                        f"({', '.join(sorted(vault_names))}).")
+            f"({', '.join(sorted(vault_names))}).",
+        )
 
     # --- ingest ---
     async def ingest(vault: str, content: str, node_set: str | None = None) -> str:
         """Wirft Input in die Queue eines Vaults dieser Instanz."""
         if vault not in vault_names:
-            return (f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
-                    f"Erlaubt: {', '.join(sorted(vault_names))}")
+            return (
+                f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
+                f"Erlaubt: {', '.join(sorted(vault_names))}"
+            )
         # Payload wie Gateway/CLI über build_payload ableiten (eine Stelle für
         # die Snippet-Titel-Logik) — vermeidet die frühere Titel-Divergenz,
         # bei der der Titel roh abgeschnitten statt via snippet_title() gebaut wurde.
@@ -81,15 +92,19 @@ def build_server(instance_name: str):
         return f"queued job {jid} ({kind}) -> {vault}"
 
     mcp.add_tool(
-        ingest, name="ingest",
-        description=f"Ingestiert Inhalt in einen Vault der Instanz '{inst.name}'.")
+        ingest,
+        name="ingest",
+        description=f"Ingestiert Inhalt in einen Vault der Instanz '{inst.name}'.",
+    )
 
     # --- job_status ---
     async def job_status(vault: str, job_id: int) -> str:
         """Status/Fehler eines Queue-Jobs eines Vaults dieser Instanz."""
         if vault not in vault_names:
-            return (f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
-                    f"Erlaubt: {', '.join(sorted(vault_names))}")
+            return (
+                f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
+                f"Erlaubt: {', '.join(sorted(vault_names))}"
+            )
         q = JobQueue(queue_path(instance_name))
         info = q.info(job_id)
         # Vault-Check: Vaults einer Instanz teilen sich die queue.db.
@@ -101,8 +116,10 @@ def build_server(instance_name: str):
         return text
 
     mcp.add_tool(
-        job_status, name="job_status",
-        description=f"Job-Status in der Queue der Instanz '{inst.name}'.")
+        job_status,
+        name="job_status",
+        description=f"Job-Status in der Queue der Instanz '{inst.name}'.",
+    )
 
     return mcp
 
