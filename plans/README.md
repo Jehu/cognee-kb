@@ -26,7 +26,7 @@ row when done.
 | 013  | Fix node-set autosuggest race | P3 | S | — | DONE |
 | 014  | Revoke object URL in openSourceRaw | P3 | S | — | DONE |
 | 015  | Strip surrounding quotes in .env parsers | P3 | S | — | DONE |
-| 016  | Close SQLite connections on shutdown | P3 | S | — | TODO |
+| 016  | Close SQLite connections on shutdown | P3 | S | — | DONE |
 | 017  | Remove stale CLAUDE.md name-drift note | P3 | S | — | TODO |
 | 018  | Structured logging + request correlation | P3 | M | — | TODO |
 | 019  | Reduce /api/health info disclosure | P3 | S | — | TODO |

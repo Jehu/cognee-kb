@@ -32,6 +32,10 @@ class JobQueue:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
 
+    def close(self) -> None:
+        """Schließt die Connection (sauberer Shutdown des Instance Service)."""
+        self.conn.close()
+
     def enqueue(self, vault: str, kind: str, payload: dict[str, Any]) -> int:
         cur = self.conn.execute(
             "INSERT INTO jobs (vault, kind, payload) VALUES (?,?,?)",
