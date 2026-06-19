@@ -72,6 +72,30 @@ def create_app() -> FastAPI:
     app = FastAPI(title="kb-gateway")
     api = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        # Defense-in-depth: das Bearer-Token liegt im PWA-localStorage. Ein
+        # künftiges innerHTML/set:html würde ohne CSP sofort den Token
+        # exfiltrieren — CSP macht daraus einen containerten Bruch.
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self';"
+            "connect-src 'self';"
+            "script-src 'self';"
+            "style-src 'self' 'unsafe-inline';"
+            "img-src 'self' data:;"
+            "object-src 'none';"
+            "base-uri 'none';"
+            "frame-ancestors 'none';"
+            "manifest-src 'self';"
+            "worker-src 'self';"
+            "form-action 'self'"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
     @api.post("/ingest", status_code=202)
     def ingest(body: IngestBody) -> dict:
         v = _resolve_vault(body.vault)

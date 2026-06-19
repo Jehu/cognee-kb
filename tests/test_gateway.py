@@ -67,6 +67,17 @@ def test_rejects_wrong_token(client):
     assert r.status_code == 401
 
 
+def test_security_headers_present(client):
+    # Defense-in-depth für den localStorage-Token: jede Antwort trägt CSP +
+    # Hardening-Header (auch die StaticFiles-Auslieferung der PWA).
+    r = client.get("/api/vaults", headers=AUTH)
+    assert r.status_code == 200
+    assert "script-src 'self'" in r.headers["Content-Security-Policy"]
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["Referrer-Policy"] == "no-referrer"
+    assert r.headers["X-Frame-Options"] == "DENY"
+
+
 def test_health_needs_no_token(client, monkeypatch):
     monkeypatch.setattr(gateway.httpx, "AsyncClient",
                         _fake_async_client(exc=httpx.ConnectError("zu")))
