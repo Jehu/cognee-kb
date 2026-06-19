@@ -19,6 +19,7 @@
 - **Depends on**: none (this is the prerequisite for all other plans)
 - **Category**: dx
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #1 — https://github.com/Jehu/cognee-kb/issues/1
 
 ## Why this matters
 

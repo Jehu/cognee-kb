@@ -14,6 +14,7 @@
 
 - **Priority**: P3 (direction) | **Effort**: S per connector (coarse) | **Risk**: MED
 - **Depends on**: none | **Category**: direction | **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #24 — https://github.com/Jehu/cognee-kb/issues/24
 
 ## Why this matters (grounding)
 

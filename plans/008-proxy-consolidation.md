@@ -20,6 +20,7 @@
   routed MCP through `build_payload`, skip the classify part of Step 2)
 - **Category**: tech-debt
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #8 — https://github.com/Jehu/cognee-kb/issues/8
 
 ## Why this matters
 

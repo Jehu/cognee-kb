@@ -61,31 +61,31 @@ addressed by plan 009 / one issue.)
 
 | # | Finding (one-line) | Plan | Issue |
 |---|--------------------|------|-------|
-| 1 | Ghost source record → silent data loss | 002 | _(filled after issue creation)_ |
-| 2 | No verification baseline | 001 | |
-| 3 | MCP title divergence | 003 | |
-| 4 | SSRF in web-ingest | 004 | |
-| 5 | Raw-source path confinement | 005 | |
-| 6 | Concurrent poll loop | 006 | |
-| 7 | Answer discarded on CHUNKS failure | 007 | |
-| 8 | Copy-paste across gateway/MCP/CLI (+ gateway r.json/body[]) | 008 | |
-| 9 | No CSP / security headers | 009 | |
-| 10 | No ruff/mypy despite noqa directives | 010 | |
-| 11 | Config validation branches untested | 011 | |
-| 12 | Stale astro + transitive CVEs, no audit gate | 012 | |
-| 13 | Node-set autosuggest race | 013 | |
-| 14 | Object URL never revoked | 014 | |
-| 15 | .env parser doesn't strip quotes | 015 | |
-| 16 | Source-chip href accepts any scheme | 009 | |
-| 17 | No close() on SQLite conns at shutdown | 016 | |
-| 18 | CLAUDE.md staleness-note is itself stale | 017 | |
-| 19 | No structured logging / correlation | 018 | |
-| 20 | /api/health discloses wall names | 019 | |
-| 21 | [investigate] Kuzu concurrency in one loop | 020 | |
-| D-A | Re-ingest / Markdown migration | 021 | |
-| D-B | Sources CRUD asymmetry | 022 | |
-| D-C | Spaced-Repetition layer | 023 | |
-| D-D | PDF / X / LinkedIn connectors | 024 | |
+| 1 | Ghost source record → silent data loss | 002 | [#2](https://github.com/Jehu/cognee-kb/issues/2) |
+| 2 | No verification baseline | 001 | [#1](https://github.com/Jehu/cognee-kb/issues/1) |
+| 3 | MCP title divergence | 003 | [#3](https://github.com/Jehu/cognee-kb/issues/3) |
+| 4 | SSRF in web-ingest | 004 | [#4](https://github.com/Jehu/cognee-kb/issues/4) |
+| 5 | Raw-source path confinement | 005 | [#5](https://github.com/Jehu/cognee-kb/issues/5) |
+| 6 | Concurrent poll loop | 006 | [#6](https://github.com/Jehu/cognee-kb/issues/6) |
+| 7 | Answer discarded on CHUNKS failure | 007 | [#7](https://github.com/Jehu/cognee-kb/issues/7) |
+| 8 | Copy-paste across gateway/MCP/CLI (+ gateway r.json/body[]) | 008 | [#8](https://github.com/Jehu/cognee-kb/issues/8) |
+| 9 | No CSP / security headers | 009 | [#9](https://github.com/Jehu/cognee-kb/issues/9) |
+| 10 | No ruff/mypy despite noqa directives | 010 | [#10](https://github.com/Jehu/cognee-kb/issues/10) |
+| 11 | Config validation branches untested | 011 | [#11](https://github.com/Jehu/cognee-kb/issues/11) |
+| 12 | Stale astro + transitive CVEs, no audit gate | 012 | [#12](https://github.com/Jehu/cognee-kb/issues/12) |
+| 13 | Node-set autosuggest race | 013 | [#13](https://github.com/Jehu/cognee-kb/issues/13) |
+| 14 | Object URL never revoked | 014 | [#14](https://github.com/Jehu/cognee-kb/issues/14) |
+| 15 | .env parser doesn't strip quotes | 015 | [#15](https://github.com/Jehu/cognee-kb/issues/15) |
+| 16 | Source-chip href accepts any scheme | 009 | [#9](https://github.com/Jehu/cognee-kb/issues/9) |
+| 17 | No close() on SQLite conns at shutdown | 016 | [#16](https://github.com/Jehu/cognee-kb/issues/16) |
+| 18 | CLAUDE.md staleness-note is itself stale | 017 | [#17](https://github.com/Jehu/cognee-kb/issues/17) |
+| 19 | No structured logging / correlation | 018 | [#18](https://github.com/Jehu/cognee-kb/issues/18) |
+| 20 | /api/health discloses wall names | 019 | [#19](https://github.com/Jehu/cognee-kb/issues/19) |
+| 21 | [investigate] Kuzu concurrency in one loop | 020 | [#20](https://github.com/Jehu/cognee-kb/issues/20) |
+| D-A | Re-ingest / Markdown migration | 021 | [#21](https://github.com/Jehu/cognee-kb/issues/21) |
+| D-B | Sources CRUD asymmetry | 022 | [#22](https://github.com/Jehu/cognee-kb/issues/22) |
+| D-C | Spaced-Repetition layer | 023 | [#23](https://github.com/Jehu/cognee-kb/issues/23) |
+| D-D | PDF / X / LinkedIn connectors | 024 | [#24](https://github.com/Jehu/cognee-kb/issues/24) |
 
 ## Spike notes
 

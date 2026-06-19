@@ -12,6 +12,7 @@
 
 - **Priority**: P3 (direction) | **Effort**: M–L (coarse) | **Risk**: MED
 - **Depends on**: none | **Category**: direction | **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #23 — https://github.com/Jehu/cognee-kb/issues/23
 
 ## Why this matters (grounding)
 

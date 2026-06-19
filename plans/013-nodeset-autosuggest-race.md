@@ -13,6 +13,7 @@
 
 - **Priority**: P3 | **Effort**: S | **Risk**: LOW | **Depends on**: none
 - **Category**: bug | **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #13 — https://github.com/Jehu/cognee-kb/issues/13
 
 ## Why this matters
 

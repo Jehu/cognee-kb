@@ -19,6 +19,7 @@
 - **Depends on**: plans/001-verification-baseline.md (CI exists), plans/010-ruff-mypy.md (recommended)
 - **Category**: security
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #12 — https://github.com/Jehu/cognee-kb/issues/12
 
 ## Why this matters
 

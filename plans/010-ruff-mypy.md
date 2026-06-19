@@ -20,6 +20,7 @@
   from 001)
 - **Category**: dx
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #10 — https://github.com/Jehu/cognee-kb/issues/10
 
 ## Why this matters
 

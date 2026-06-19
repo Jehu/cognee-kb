@@ -19,6 +19,7 @@
 - **Depends on**: none
 - **Category**: bug
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #3 — https://github.com/Jehu/cognee-kb/issues/3
 
 ## Why this matters
 

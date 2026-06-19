@@ -19,6 +19,7 @@
 - **Depends on**: plans/001-verification-baseline.md (so `make test` runs the new test)
 - **Category**: bug
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #2 — https://github.com/Jehu/cognee-kb/issues/2
 
 ## Why this matters
 

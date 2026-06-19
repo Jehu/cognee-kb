@@ -19,6 +19,7 @@
 - **Depends on**: none
 - **Category**: security
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #5 — https://github.com/Jehu/cognee-kb/issues/5
 
 ## Why this matters
 

@@ -13,6 +13,7 @@
 
 - **Priority**: P3 | **Effort**: S | **Risk**: LOW | **Depends on**: none
 - **Category**: security | **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #19 — https://github.com/Jehu/cognee-kb/issues/19
 
 ## Why this matters
 

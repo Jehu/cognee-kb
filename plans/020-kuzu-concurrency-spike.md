@@ -17,6 +17,7 @@
 - **Depends on**: none
 - **Category**: investigation (correctness/concurrency)
 - **Planned at**: commit `5c096b7`, 2026-06-19
+- **Issue**: #20 — https://github.com/Jehu/cognee-kb/issues/20
 
 ## Why this matters
 
