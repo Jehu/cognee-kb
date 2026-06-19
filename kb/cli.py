@@ -16,6 +16,7 @@ from kb.config import (
     get_vault,
     queue_path,
 )
+from kb.envutil import strip_quotes
 from kb.queue import JobQueue
 from kb.sources import SourceStore
 
@@ -124,7 +125,7 @@ def _load_env_file(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+        os.environ.setdefault(key.strip(), strip_quotes(value))
 
 
 @app.command("serve-instance")

@@ -17,6 +17,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from kb.config import Instance
+from kb.envutil import strip_quotes
 from kb.guard import assert_instance_env
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
@@ -34,7 +35,7 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ[key.strip()] = value.strip()
+        os.environ[key.strip()] = strip_quotes(value)
     # Cognee-Verzeichnisse per Konvention aus var_dir ableiten (Single Source:
     # config.py) statt absoluter Pfade in den Env-Files — portabel für die VPS.
     # Cognees eigene Defaults zeigen ins installierte Package (.venv!), und es
