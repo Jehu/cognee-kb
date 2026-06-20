@@ -36,7 +36,7 @@ row when done.
 | 023  | [direction] Spaced-Repetition (SM-2) layer | P3 | M–L | — | DONE |
 | 024  | [direction] Source connectors (PDF/X/LinkedIn) | P3 | S | — | DONE |
 | 025  | Serialize cognee access (asyncio.Lock) | P2 | S | 020 | DONE | → #25 |
-| 026  | `kb import` Markdown migration | P2 | S | — | TODO | → #26 |
+| 026  | `kb import` Markdown migration | P2 | S | — | DONE | → #26 |
 | 027  | Sources list (delete separat) | P2 | S | — | DONE | → #27 |
 | 028  | PDF connector | P3 | S | 004 | DONE | → #28 |
 

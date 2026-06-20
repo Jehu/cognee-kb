@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from pathlib import Path
 
 import typer
@@ -15,6 +16,7 @@ from kb.config import (
     get_instance,
     get_vault,
     queue_path,
+    sources_path,
 )
 from kb.envutil import strip_quotes
 from kb.queue import JobQueue
@@ -98,6 +100,67 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None
     q = JobQueue(queue_path(v.instance))
     jid = q.enqueue(v.name, kind, payload)
     typer.echo(f"queued: job {jid} ({kind}) -> {v.name}")
+
+
+@app.command("import")
+def import_cmd(
+    vault: str,
+    path: Path,
+    node_set: str = typer.Option(None, "--node-set"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Importiert alle .md/.txt-Dateien unter <path> in einen Vault (Queue).
+
+    Migration bestehender Markdown-Bestände (PRD Phase 3). Enqueued pro Datei
+    einen `file`-Job — der serielle Worker übernimmt Raw-Kopie + cognee-Ingest
+    (Serial-Constraint F7 bleibt gewahrt). Duplikate (gleicher Body im selben
+    Vault) werden übersprungen. Vault-Routing explizit per Arg (Single-User).
+    """
+    try:
+        v = get_vault(vault)
+    except UnknownVaultError:
+        typer.echo(f"Unbekannter Vault: {vault}", err=True)
+        raise typer.Exit(1) from None
+    if not path.exists():
+        typer.echo(f"Pfad nicht gefunden: {path}", err=True)
+        raise typer.Exit(1) from None
+
+    if path.is_file():
+        files = [path] if path.suffix.lower() in (".md", ".txt") else []
+    else:
+        files = sorted(p for p in path.rglob("*") if p.suffix.lower() in (".md", ".txt"))
+    if not files:
+        typer.echo(f"Keine .md/.txt-Dateien unter {path} gefunden.", err=True)
+        raise typer.Exit(1) from None
+
+    # SourceStore nur für den Dedup-Vorab-Check (Lesen; WAL erlaubt das neben
+    # einem laufenden Worker). Der Worker prüft ohnehin nochmal authoritativ.
+    store = SourceStore(sources_path(v.instance))
+    q = None if dry_run else JobQueue(queue_path(v.instance))
+    enqueued = skipped = 0
+    for f in files:
+        try:
+            body = f.read_text(encoding="utf-8")
+        except OSError as e:
+            typer.echo(f"  übersprungen (Lesefehler): {f} — {e}", err=True)
+            continue
+        content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if store.find_by_hash(content_hash, v.name) is not None:
+            skipped += 1
+            typer.echo(f"  Duplikat (übersprungen): {f.name}")
+            continue
+        if dry_run:
+            enqueued += 1
+            typer.echo(f"  würde enqueuen: {f.name}")
+            continue
+        payload: dict[str, object] = {"path": str(f.resolve())}
+        if node_set:
+            payload["node_set"] = node_set
+        assert q is not None  # dry_run ist hier False
+        q.enqueue(v.name, "file", payload)
+        enqueued += 1
+    mode = " (--dry-run)" if dry_run else ""
+    typer.echo(f"Import{mode}: {enqueued} enqueued, {skipped} Duplikate -> {v.name}")
 
 
 @app.command()
