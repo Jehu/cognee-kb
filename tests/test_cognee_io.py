@@ -2,6 +2,8 @@ import asyncio
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from kb.cognee_io import (
     _extract_source_ids,
     _iter_strings,
@@ -198,3 +200,36 @@ def test_iter_strings_depth_limit():
     # Kein Crash, evtl. leaf nicht gefunden (jenseits Tiefenlimit) — OK
     result = list(_iter_strings(obj))
     assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_cognee_access_is_serialized(monkeypatch):
+    # Spike 020: cognee 0.3.9 führt Kuzu-Operationen in einem ThreadPool auf
+    # EINER geteilten Connection aus -> cognify+search dürfen nicht gleichzeitig
+    # bei cognee ankommen. cognee_io muss sie serialisieren (asyncio.Lock).
+    # Dieser Test schlägt fehl, sobald zwei query_with_sources cognee.search
+    # überlappend betreten (ohne Lock).
+    import asyncio as _asyncio
+
+    in_flight = {"n": 0, "max": 0}
+
+    class _SearchType:
+        GRAPH_COMPLETION = "graph"
+        CHUNKS = "chunks"
+
+    async def search(**kwargs):
+        in_flight["n"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["n"])
+        await _asyncio.sleep(0.03)  # Fenster für echtes Overlap
+        in_flight["n"] -= 1
+        return [_StubSearchResult("A")]
+
+    fake_cognee = SimpleNamespace(search=search, SearchType=_SearchType)
+    monkeypatch.setitem(sys.modules, "cognee", fake_cognee)
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+
+    await _asyncio.gather(
+        query_with_sources(get_instance("local"), "Q1", ["privat"]),
+        query_with_sources(get_instance("local"), "Q2", ["privat"]),
+    )
+    assert in_flight["max"] == 1, "cognee.search wurde konkurrent betreten (Serialisierung fehlt)"
