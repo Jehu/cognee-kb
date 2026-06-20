@@ -27,7 +27,7 @@ make test                  # beides zusammen
 
 ```sh
 uv run kb ingest <vault> <url-oder-text-oder-datei>   # in Queue legen
-uv run kb import <vault> <dir-oder-datei>             # .md/.txt-Bestand migrieren (--dry-run, --node-set)
+uv run kb import <vault> <dir-oder-datei>             # .md/.txt-Bestand migrieren (--exclude, --only-newer-than, --limit, --dry-run)
 uv run kb worker <instance>                           # Queue abarbeiten (local | cloud)
 uv run kb query <vault> "Frage"                       # GRAPH_COMPLETION
 ```

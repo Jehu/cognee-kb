@@ -1,8 +1,9 @@
+from datetime import UTC
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from kb.cli import _is_excluded, app
+from kb.cli import _is_excluded, _parse_cutoff, app
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
@@ -208,3 +209,76 @@ def test_import_exclude_subdir(tmp_path, monkeypatch):
     assert "1 enqueued" in result.output
     n = JobQueue(tmp_path / "local_q.db").conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     assert n == 1  # drafts/wip.md gefiltert
+
+
+def test_parse_cutoff_dauer():
+    from datetime import datetime
+
+    jetzt = datetime.now(UTC)
+    assert abs((jetzt - _parse_cutoff("7d")).total_seconds() - 7 * 86400) < 5
+    assert abs((jetzt - _parse_cutoff("2w")).total_seconds() - 14 * 86400) < 5
+    assert abs((jetzt - _parse_cutoff("12h")).total_seconds() - 12 * 3600) < 5
+
+
+def test_parse_cutoff_iso_date():
+    from datetime import datetime
+
+    assert _parse_cutoff("2026-06-01") == datetime(2026, 6, 1, tzinfo=UTC)
+
+
+def test_parse_cutoff_rejects_invalid():
+    import pytest
+    import typer
+
+    with pytest.raises(typer.BadParameter):
+        _parse_cutoff("neulich")
+
+
+def test_import_limit_caps_enqueued(tmp_path, monkeypatch):
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    d.mkdir()
+    for i in range(3):
+        (d / f"n{i}.md").write_text(f"Inhalt {i}")
+    result = runner.invoke(app, ["import", "privat", str(d), "--limit", "1"])
+    assert result.exit_code == 0, result.output
+    assert "1 enqueued" in result.output
+    n = JobQueue(tmp_path / "local_q.db").conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert n == 1
+
+
+def test_import_only_newer_than_duration(tmp_path, monkeypatch):
+    import os
+    import time
+
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    d.mkdir()
+    alt = d / "alt.md"
+    alt.write_text("alt")
+    neu = d / "neu.md"
+    neu.write_text("neu")
+    alters_ts = time.time() - 2 * 86400  # 2 Tage her
+    os.utime(alt, (alters_ts, alters_ts))
+    result = runner.invoke(app, ["import", "privat", str(d), "--only-newer-than", "1d"])
+    assert result.exit_code == 0, result.output
+    assert "1 enqueued" in result.output
+    assert "1 zu alt" in result.output
+
+
+def test_import_only_newer_than_iso(tmp_path, monkeypatch):
+    import os
+
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    d.mkdir()
+    alt = d / "alt.md"
+    alt.write_text("alt")
+    neu = d / "neu.md"
+    neu.write_text("neu")
+    # 'alt' weit in der Vergangenheit, 'neu' jetzt.
+    os.utime(alt, (1_000_000_000, 1_000_000_000))
+    result = runner.invoke(app, ["import", "privat", str(d), "--only-newer-than", "2020-01-01"])
+    assert result.exit_code == 0
+    assert "1 enqueued" in result.output
+    assert "1 zu alt" in result.output
