@@ -54,6 +54,14 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
     assert_instance_env(instance)
 
 
+# Konzept: ein Worker/Instanz + ein Loop — aber ACHTUNG: cognee 0.3.9 nutzt bei
+# shared_kuzu_lock=False (Default) einen ThreadPoolExecutor für Kuzu, d. h.
+# cognify (Schreiben) und search (Lesen) liefen im selben Prozess concurrency
+# auf EINEM geteilten Kuzu-Connection-Objekt (nicht thread-safe). Das ist der
+# offene Punkt aus Spike 020 — Serialisierung via asyncio.Lock geplant (Plan 025).
+# Siehe plans/README.md "Spike notes".
+
+
 async def ingest(instance: Instance, file_path: Path, dataset: str, node_sets: list[str]) -> None:
     assert_instance_env(instance)
     import cognee  # lazy: erst nach load_instance_env importieren
