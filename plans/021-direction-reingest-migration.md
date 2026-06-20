@@ -81,3 +81,29 @@
 
 - If this becomes a build plan, it depends on plan 002 (so re-import dedup is
   cleanup-safe) and must respect plan 020's Kuzu-concurrency conclusion.
+
+---
+
+## Spike result (2026-06-20)
+
+**GO** — niedrige inkrementelle Komplexität; das ist das offene PRD-Phase-3-Item
+und blockiert Erfolgskriterium #4 (Obsidian-Git-Sync abschalten).
+
+**Antworten auf die offenen Fragen:**
+1. **Source-Mapping:** v1 behandelt Legacy-`.md` als plain Text (`kind="file"`).
+   Frontmatter-Erhaltung (Original-URL/-Datum als `SourceRecord`-Felder) ist ein
+   bewusst zurückgestelltes v2 — kein Blocker für den Nutzen.
+2. **Vault-Routing:** explizit per CLI-Arg `kb import <vault> <dir>` (Single-User;
+   keine Auto-Klassifikation business-ki vs business-mwe — das entscheidet Marco
+   pro Import).
+3. **Dedup:** bestehender `find_by_hash`-Check (cleanup-aware seit Plan 002) —
+   identischer Inhalt wird übersprungen (sicherer Default); `--force` später.
+4. **Serial-Constraint (F7):** Import enqueued nur Jobs (ruft nie cognee direkt) →
+   der serielle Worker bleibt die einzige Schreibstelle. ✓
+5. **raw-Kopie:** der Worker-`file`-Zweig liest die Quelle und schreibt die
+   kanonische Kopie nach `raw/<vault>/` (Exit-Rampen-Invariante bleibt gewahrt).
+
+**Design (build-ready):** `kb import <vault> <path> [--node-set X] [--dry-run]`
+— rekursiver Walk über `.md`/`.txt`, pro Datei ein `file`-Job via bestehendem
+`queue_path`/`JobQueue.enqueue`. Fast kein neuer Code (Pipeline existiert);
+`--dry-run` zählt + zeigt Dedup-Treffer. → Folge-Bauplan `026-import-command.md`.

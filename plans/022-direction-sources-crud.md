@@ -66,3 +66,32 @@ hand. This is CRUD-asymmetry completion, not a new capability.
 
 - If delete becomes possible later, this is the first feature to revisit. The
   list endpoint alone (without delete) may still be worth a small follow-up.
+
+---
+
+## Spike result (2026-06-20)
+
+**Gemischt — GO für List, bedingt GO für Delete.**
+
+**Kernbefund (cognee):** `cognee.delete(data_id, dataset_id, mode="soft"|"hard")`
+existiert (`cognee/api/v1/delete/delete.py`) — Pro-Source-Löschen ist
+principiell möglich. **Aber:** cognees `data_id` (UUID, von cognee beim `add()`
+vergeben) wird von kb **nicht** gespeichert — `cognee_io.ingest` verwirft den
+Rückgabewert von `cognee.add()`. Eine saubere Löschung setzt also voraus, dass
+kb die cognee-`data_id` beim Ingest persistiert (Schema-Erweiterung
+`SourceRecord` + `cognee_io`).
+
+**Antworten:**
+1. **List:** trivial — `SourceStore` hält die Records; ein `list_by_vault()` +
+   `GET /api/sources/{vault}` + PWA-Seite. Keine cognee-Abhängigkeit.
+2. **Delete-Cascade:** `cognee.delete(data_id, …)` (Graph+Vektor) **plus**
+   `SourceStore.delete` **plus** `rawstore`-Unlink. Funktioniert erst, wenn die
+   `data_id` getrackt wird — sonst hinterlässt ein kb-Delete einen Geist im
+   Graphen (Quelle taucht in Queries wieder auf).
+3. **Edit:** = Delete + Re-Ingest (Metadaten leben in cognee).
+
+**Empfehlung:** **List sofort** (kleiner Follow-up), **Delete als eigener Plan
+mit `data_id`-Tracking** (Schema-Migration bestehender Records nötig → nicht
+trivial). Wer nur List baut, hat bereits den Hauptnutzen (Aufräumen sehen,
+node-sets prüfen).
+→ `027a-sources-list.md` (list), `027b-sources-delete.md` (delete + data_id).
