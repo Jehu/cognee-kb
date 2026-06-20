@@ -127,6 +127,15 @@ class SourceStore:
         ).fetchone()
         return SourceRecord(*row) if row else None
 
+    def list_by_vault(self, vault: str, limit: int = 50, offset: int = 0) -> list[SourceRecord]:
+        """Quellen eines Vaults, neueste zuerst (für die Management-Ansicht)."""
+        rows = self.conn.execute(
+            f"SELECT {self._COLS} FROM sources WHERE vault=? "
+            "ORDER BY fetched_at DESC LIMIT ? OFFSET ?",
+            (vault, limit, offset),
+        ).fetchall()
+        return [SourceRecord(*row) for row in rows]
+
     def delete(self, source_id: str) -> None:
         """Löscht einen Source-Record (Cleanup bei fehlgeschlagenem Ingest)."""
         self.conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
