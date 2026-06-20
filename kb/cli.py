@@ -86,7 +86,11 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None
         raise typer.Exit(1) from None
     p = Path(content).expanduser()
     if p.is_file():
-        kind, payload = "file", {"path": str(p.resolve())}
+        # Lokales PDF → eigener PDF-Zweig (pypdf-Extraktion), kein read_text().
+        if p.suffix.lower() == ".pdf":
+            kind, payload = "pdf", {"path": str(p.resolve())}
+        else:
+            kind, payload = "file", {"path": str(p.resolve())}
     else:
         kind, payload = build_payload(content)
     if node_set:

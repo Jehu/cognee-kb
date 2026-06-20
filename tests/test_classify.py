@@ -11,6 +11,8 @@ from kb.classify import build_payload, classify, snippet_title
         ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "youtube"),
         ("https://example.com/artikel", "web"),
         ("http://blog.fefe.de/?ts=99", "web"),
+        ("https://example.com/paper.pdf", "pdf"),
+        ("https://example.com/paper.PDF?download=1", "pdf"),
         ("Nur ein Gedanke ohne Link.", "snippet"),
         ("Text mit URL drin https://example.com aber Text dominiert", "snippet"),
     ],
@@ -59,6 +61,11 @@ def test_build_payload_youtube():
 def test_build_payload_web():
     kind, p = build_payload("https://example.com/x")
     assert kind == "web" and p["url"] == "https://example.com/x"
+
+
+def test_build_payload_pdf_url():
+    kind, p = build_payload("https://example.com/paper.pdf")
+    assert kind == "pdf" and p["url"] == "https://example.com/paper.pdf"
 
 
 def test_build_payload_snippet_derives_clean_title():

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kb import cognee_io, fetch_web, fetch_youtube, rawstore
+from kb import cognee_io, fetch_pdf, fetch_web, fetch_youtube, rawstore
 from kb.config import Instance, get_vault
 from kb.fetch_youtube import FetchedDoc
 from kb.logging_setup import setup_logging
@@ -20,6 +20,11 @@ def _fetch(kind: str, payload: dict[str, Any]) -> FetchedDoc:
         return fetch_youtube.fetch(payload["url"], payload["video_id"])
     if kind == "web":
         return fetch_web.fetch(payload["url"])
+    if kind == "pdf":
+        # URL (Guard-geschützt) oder lokaler Dateipfad.
+        if "url" in payload:
+            return fetch_pdf.fetch(payload["url"])
+        return fetch_pdf.from_path(payload["path"])
     if kind == "snippet":
         return FetchedDoc(title=payload.get("title", "Snippet"), body=payload["text"])
     if kind == "file":

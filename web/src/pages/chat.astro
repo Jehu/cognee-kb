@@ -67,7 +67,7 @@ import Base from '../layouts/Base.astro';
       return part.endsWith('.md') ? part.slice(0, -3) : part;
     }
 
-    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄' };
+    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
 
     function currentVault() {
       return (vaultState?.vaults || []).find((vault) => vault.name === vaultSel.value);

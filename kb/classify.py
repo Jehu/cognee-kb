@@ -4,17 +4,20 @@ from typing import Any
 
 YOUTUBE_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([\w-]{11})")
 URL_RE = re.compile(r"^https?://\S+$")
+PDF_RE = re.compile(r"^https?://\S+\.pdf(?:[?#]|$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class Classified:
-    kind: str  # youtube | web | snippet
+    kind: str  # youtube | web | pdf | snippet
     video_id: str | None = None
 
 
 def classify(text: str) -> Classified:
     text = text.strip()
     if URL_RE.match(text):
+        if PDF_RE.match(text):
+            return Classified("pdf")
         m = YOUTUBE_RE.search(text)
         if m:
             return Classified("youtube", video_id=m.group(1))
@@ -59,6 +62,8 @@ def build_payload(content: str) -> tuple[str, dict[str, Any]]:
     EINER Stelle lebt statt dupliziert.
     """
     c = classify(content)
+    if c.kind == "pdf":
+        return c.kind, {"url": content.strip()}
     if c.kind == "youtube":
         return c.kind, {"url": content.strip(), "video_id": c.video_id}
     if c.kind == "web":
