@@ -45,7 +45,11 @@ import Base from '../layouts/Base.astro';
 
     async function loadHealth() {
       try {
-        const res = await fetch('/api/health');
+        const token = localStorage.getItem('kb_token');
+        // Token mitgeben, damit die Instanz-Map zurückkommt (sonst nur Gateway-OK).
+        const res = await fetch('/api/health', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (!res.ok) return 'Gateway: Fehler beim Statusabruf';
         const health = await res.json();
         const instances = Object.entries(health.instances || {})

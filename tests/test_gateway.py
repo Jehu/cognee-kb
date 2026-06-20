@@ -88,10 +88,23 @@ def test_response_carries_request_id(client):
 
 
 def test_health_needs_no_token(client, monkeypatch):
+    # Unauthentifiziert: Gateway lebt, aber KEINE Instanz-/Wall-Namen (Privacy).
     monkeypatch.setattr(
         gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
     )
     r = client.get("/api/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["gateway"] == "ok"
+    assert "instances" not in body
+
+
+def test_health_instances_map_requires_token(client, monkeypatch):
+    # Mit Token: die Instanz-Map kommt zurück (Wall-Namen + Liveness).
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
+    )
+    r = client.get("/api/health", headers=AUTH)
     assert r.status_code == 200
     body = r.json()
     assert body["gateway"] == "ok"
