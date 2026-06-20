@@ -61,6 +61,11 @@ target-version = "py312"
 # erlaubt (Worker darf nie sterben). Konservative Selection, kein Stil-Dogma.
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.flake8-bugbear]
+# Typer verlangt typer.Option/Argument als Default-Werte in Signaturdekoratoren
+# — B008 (Call-in-Default) ist hier idiomatisch, nicht fehlerhaft.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.format]
 quote-style = "double"
 

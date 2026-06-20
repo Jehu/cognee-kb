@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import hashlib
 from pathlib import Path
 
@@ -102,11 +103,28 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None
     typer.echo(f"queued: job {jid} ({kind}) -> {v.name}")
 
 
+def _is_excluded(f: Path, root: Path, patterns: list[str]) -> bool:
+    """True, wenn Dateiname ODER relativer Pfad auf ein Glob-Muster passt.
+
+    fnmatch behandelt `*` inkl. Pfadtrenner, daher deckt `_index.md` (Name),
+    `_*.md` (Prefix) und `drafts/*` (Unterordner) denselben Mechanismus ab.
+    """
+    if not patterns:
+        return False
+    try:
+        rel = Path(f.name) if root.is_file() else f.relative_to(root)
+    except ValueError:
+        rel = Path(f.name)
+    rel_s = str(rel)
+    return any(fnmatch.fnmatch(f.name, p) or fnmatch.fnmatch(rel_s, p) for p in patterns)
+
+
 @app.command("import")
 def import_cmd(
     vault: str,
     path: Path,
     node_set: str = typer.Option(None, "--node-set"),
+    exclude: list[str] = typer.Option(None, "--exclude", "-x", help="Glob-Ausschluss (mehrfach)"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Importiert alle .md/.txt-Dateien unter <path> in einen Vault (Queue).
@@ -115,6 +133,7 @@ def import_cmd(
     einen `file`-Job — der serielle Worker übernimmt Raw-Kopie + cognee-Ingest
     (Serial-Constraint F7 bleibt gewahrt). Duplikate (gleicher Body im selben
     Vault) werden übersprungen. Vault-Routing explizit per Arg (Single-User).
+    `--exclude` filtert per Glob (z. B. `_index.md`, `_*.md`, `drafts/*`).
     """
     try:
         v = get_vault(vault)
@@ -137,8 +156,12 @@ def import_cmd(
     # einem laufenden Worker). Der Worker prüft ohnehin nochmal authoritativ.
     store = SourceStore(sources_path(v.instance))
     q = None if dry_run else JobQueue(queue_path(v.instance))
-    enqueued = skipped = 0
+    enqueued = skipped = excluded = 0
     for f in files:
+        if _is_excluded(f, path, exclude):
+            excluded += 1
+            typer.echo(f"  ausgeschlossen: {f.name}")
+            continue
         try:
             body = f.read_text(encoding="utf-8")
         except OSError as e:
@@ -160,7 +183,10 @@ def import_cmd(
         q.enqueue(v.name, "file", payload)
         enqueued += 1
     mode = " (--dry-run)" if dry_run else ""
-    typer.echo(f"Import{mode}: {enqueued} enqueued, {skipped} Duplikate -> {v.name}")
+    typer.echo(
+        f"Import{mode}: {enqueued} enqueued, {skipped} Duplikate, "
+        f"{excluded} ausgeschlossen -> {v.name}"
+    )
 
 
 @app.command()

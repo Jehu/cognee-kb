@@ -1,6 +1,8 @@
+from pathlib import Path
+
 from typer.testing import CliRunner
 
-from kb.cli import app
+from kb.cli import _is_excluded, app
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
@@ -156,3 +158,53 @@ def test_import_no_matching_files(tmp_path, monkeypatch):
     result = runner.invoke(app, ["import", "privat", str(d)])
     assert result.exit_code != 0
     assert "Keine" in result.output
+
+
+def test_is_excluded_matches_name_glob_and_path():
+    root = Path("/wiki")
+    assert _is_excluded(Path("/wiki/_index.md"), root, ["_index.md"])
+    assert _is_excluded(Path("/wiki/sub/_index.md"), root, ["_index.md"])  # überall
+    assert _is_excluded(Path("/wiki/_sidebar.md"), root, ["_*.md"])
+    assert not _is_excluded(Path("/wiki/notiz.md"), root, ["_*.md"])
+    assert _is_excluded(Path("/wiki/drafts/wip.md"), root, ["drafts/*"])
+    assert not _is_excluded(Path("/wiki/_index.md"), root, [])  # ohne Muster: nichts
+
+
+def test_import_exclude_by_name(tmp_path, monkeypatch):
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    d.mkdir()
+    (d / "_index.md").write_text("MOC")
+    (d / "notiz.md").write_text("Inhalt")
+    result = runner.invoke(app, ["import", "privat", str(d), "--exclude", "_index.md"])
+    assert result.exit_code == 0, result.output
+    assert "1 enqueued" in result.output
+    assert "1 ausgeschlossen" in result.output
+    n = JobQueue(tmp_path / "local_q.db").conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert n == 1  # nur notiz.md
+
+
+def test_import_exclude_glob_prefix(tmp_path, monkeypatch):
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    d.mkdir()
+    (d / "_index.md").write_text("MOC")
+    (d / "_sidebar.md").write_text("nav")
+    (d / "notiz.md").write_text("Inhalt")
+    result = runner.invoke(app, ["import", "privat", str(d), "-x", "_*.md"])
+    assert result.exit_code == 0
+    assert "1 enqueued" in result.output
+    assert "2 ausgeschlossen" in result.output
+
+
+def test_import_exclude_subdir(tmp_path, monkeypatch):
+    _patch_io(monkeypatch, tmp_path)
+    d = tmp_path / "vault"
+    (d / "drafts").mkdir(parents=True)
+    (d / "drafts" / "wip.md").write_text("draft")
+    (d / "notiz.md").write_text("Inhalt")
+    result = runner.invoke(app, ["import", "privat", str(d), "--exclude", "drafts/*"])
+    assert result.exit_code == 0
+    assert "1 enqueued" in result.output
+    n = JobQueue(tmp_path / "local_q.db").conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+    assert n == 1  # drafts/wip.md gefiltert
