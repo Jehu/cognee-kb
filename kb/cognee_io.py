@@ -10,6 +10,7 @@ Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
   Key 'search_result' (empirisch, Phase-0-Lauf). `_render` behandelt beides.
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -21,6 +22,14 @@ from kb.envutil import strip_quotes
 from kb.guard import assert_instance_env
 
 logger = logging.getLogger("kb.cognee_io")
+
+# Serialisiert ALLE cognee-Aufrufe innerhalb eines Prozesses (Spike 020):
+# cognee 0.3.9 führt Kuzu-Operationen auf einer geteilten Connection in einem
+# ThreadPool aus — cognify (Schreiben) und search (Lesen) dürfen daher nicht
+# gleichzeitig bei cognee ankommen. Kosten: Queries blockieren während eines
+# Ingests (single-user tragbar). Bindet sich lazily an den ersten Loop (3.10+),
+# und jedes cognee_io wird prozesslokal auf genau einem Loop ausgeführt.
+_COGNEE_LOCK = asyncio.Lock()
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
 _SOURCE_ID_RE = re.compile(
@@ -66,8 +75,9 @@ async def ingest(instance: Instance, file_path: Path, dataset: str, node_sets: l
     assert_instance_env(instance)
     import cognee  # lazy: erst nach load_instance_env importieren
 
-    await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
-    await cognee.cognify(datasets=[dataset])
+    async with _COGNEE_LOCK:
+        await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
+        await cognee.cognify(datasets=[dataset])
 
 
 async def query(instance: Instance, question: str, datasets: list[str]) -> str:
@@ -75,11 +85,12 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
     import cognee
     from cognee import SearchType
 
-    results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text=question,
-        datasets=datasets,
-    )
+    async with _COGNEE_LOCK:
+        results = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text=question,
+            datasets=datasets,
+        )
     return "\n".join(_render(r) for r in results)
 
 
@@ -148,24 +159,25 @@ async def query_with_sources(
     import cognee
     from cognee import SearchType
 
-    results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text=question,
-        datasets=datasets,
-    )
-    answer = "\n".join(_render(r) for r in results)
-
-    try:
-        chunk_results = await cognee.search(
-            query_type=SearchType.CHUNKS,
+    async with _COGNEE_LOCK:
+        results = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
             query_text=question,
             datasets=datasets,
         )
-        source_ids = _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]
-    except Exception as e:  # noqa: BLE001 — Quellen sind Komfort, Antwort ist Pflicht
-        # CHUNKS ist nur die Herkunfts-Extraktion. Schlägt sie fehl, liefern wir
-        # die Antwort ohne Quellen-Chips statt die ganze Query sterben zu lassen
-        # (sonst 502 trotz fertiger Antwort).
-        logger.warning("CHUNKS-Suche fehlgeschlagen: %s: %s", type(e).__name__, e)
-        source_ids = []
+        answer = "\n".join(_render(r) for r in results)
+
+        try:
+            chunk_results = await cognee.search(
+                query_type=SearchType.CHUNKS,
+                query_text=question,
+                datasets=datasets,
+            )
+            source_ids = _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]
+        except Exception as e:  # noqa: BLE001 — Quellen sind Komfort, Antwort ist Pflicht
+            # CHUNKS ist nur die Herkunfts-Extraktion. Schlägt sie fehl, liefern wir
+            # die Antwort ohne Quellen-Chips statt die ganze Query sterben zu lassen
+            # (sonst 502 trotz fertiger Antwort).
+            logger.warning("CHUNKS-Suche fehlgeschlagen: %s: %s", type(e).__name__, e)
+            source_ids = []
     return answer, source_ids
