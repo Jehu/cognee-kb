@@ -359,3 +359,46 @@ def test_source_raw_rejects_path_outside_raw_dir(source_client, tmp_path):
     _insert_source_record(tmp_path, "src5", "business-mwe", str(outside))
     r = source_client.get("/api/source/business-mwe/src5/raw", headers=AUTH)
     assert r.status_code == 404
+
+
+# --- Sources list (/api/sources/{vault}) ---
+
+
+def _src(source_id, vault, title, type_="snippet", fetched_at="2026-06-01T00:00:00Z"):
+    return SourceRecord(
+        id=source_id,
+        type=type_,
+        url=None,
+        video_id=None,
+        locator=None,
+        fetched_at=fetched_at,
+        vault=vault,
+        raw_md_path="raw/x.md",
+        title=title,
+    )
+
+
+def test_sources_lists_only_requested_vault(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    store = SourceStore(tmp_path / "cloud_sources.db")
+    store.insert(_src("s1", "business-mwe", "Notiz 1"))
+    store.insert(_src("s2", "business-ki", "Fremder Vault"))  # anderer Vault
+    r = client.get("/api/sources/business-mwe", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["vault"] == "business-mwe"
+    assert [s["source_id"] for s in body["sources"]] == ["s1"]
+    assert body["sources"][0]["title"] == "Notiz 1"
+    # raw_md_path ist intern und wird bewusst nicht ausgeliefert.
+    assert "raw_md_path" not in body["sources"][0]
+
+
+def test_sources_requires_token(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    r = client.get("/api/sources/business-mwe")
+    assert r.status_code == 401
+
+
+def test_sources_unknown_vault(client):
+    r = client.get("/api/sources/geheim", headers=AUTH)
+    assert r.status_code == 404

@@ -1,0 +1,147 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Quellen">
+  <section class="page-intro">
+    <h1>Quellen</h1>
+    <p>Alle erfassten Quellen eines Vaults. Aufräumen noch per CLI/PWA-Ingest.</p>
+  </section>
+  <label for="vault">Vault</label>
+  <select id="vault"></select>
+  <div id="vault-context" class="meta-row"></div>
+
+  <div id="error" class="status error hidden"></div>
+  <div id="state" class="meta-row"></div>
+  <ul id="list" class="sources-list"></ul>
+
+  <script>
+    import { initVaultSelect, loadSources } from '../lib/api.js';
+
+    const vaultSel = document.getElementById('vault');
+    const vaultContext = document.getElementById('vault-context');
+    const errorEl = document.getElementById('error');
+    const stateEl = document.getElementById('state');
+    const listEl = document.getElementById('list');
+    let vaultState = null;
+
+    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📄' };
+
+    function currentVault() {
+      return (vaultState?.vaults || []).find((v) => v.name === vaultSel.value);
+    }
+
+    function renderVaultContext() {
+      vaultContext.replaceChildren();
+      const vault = currentVault();
+      if (!vault?.instance) return;
+      vaultContext.append(
+        document.createTextNode('Wall '),
+        Object.assign(document.createElement('span'), {
+          className: `wall-badge ${vault.instance}`,
+          textContent: vault.instance,
+        }),
+      );
+    }
+
+    function showAuthRequired() {
+      errorEl.className = 'status error';
+      errorEl.replaceChildren(
+        document.createTextNode('Token fehlt oder ist ungültig. '),
+        Object.assign(document.createElement('a'), {
+          href: '/settings/',
+          textContent: 'Token setzen',
+        }),
+        document.createTextNode(', dann Vaults laden.'),
+      );
+    }
+
+    async function refresh() {
+      listEl.replaceChildren();
+      if (!vaultSel.value) return;
+      stateEl.textContent = 'Lade…';
+      errorEl.classList.add('hidden');
+      try {
+        const sources = await loadSources(vaultSel.value);
+        stateEl.textContent = `${sources.length} Quellen`;
+        if (sources.length === 0) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = 'Noch keine Quellen in diesem Vault.';
+          listEl.append(li);
+          return;
+        }
+        for (const src of sources) {
+          const icon = TYPE_ICON[src.type] || '📄';
+          const title = src.title || src.type || 'Ohne Titel';
+          const li = document.createElement('li');
+          li.className = 'source-row';
+          const head = document.createElement('div');
+          head.className = 'source-head';
+          head.append(
+            Object.assign(document.createElement('span'), {
+              className: 'source-title',
+              textContent: `${icon} ${title}`,
+            }),
+          );
+          const meta = document.createElement('div');
+          meta.className = 'source-meta';
+          meta.textContent = `${src.type} · ${src.fetched_at || ''}`;
+          li.append(head, meta);
+          listEl.append(li);
+        }
+      } catch (e) {
+        stateEl.textContent = '';
+        errorEl.textContent = e.message;
+        errorEl.classList.remove('hidden');
+      }
+    }
+
+    initVaultSelect(vaultSel).then((state) => {
+      vaultState = state;
+      renderVaultContext();
+      if (!state.ok) {
+        showAuthRequired();
+        return;
+      }
+      refresh();
+    });
+
+    vaultSel.addEventListener('change', () => {
+      renderVaultContext();
+      refresh();
+    });
+  </script>
+  <style is:global>
+    .sources-list {
+      list-style: none;
+      margin: 1rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .sources-list li.empty {
+      color: var(--muted);
+      font-style: italic;
+      padding: 0.6rem 0;
+    }
+    .source-row {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+      background: color-mix(in srgb, var(--surface) 90%, transparent);
+    }
+    .source-head { display: flex; justify-content: space-between; gap: 0.5rem; }
+    .source-title {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .source-meta {
+      margin-top: 0.2rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+  </style>
+</Base>

@@ -174,6 +174,29 @@ def create_app() -> FastAPI:
         q = JobQueue(queue_path(v.instance))
         return {"vault": v.name, "node_sets": q.node_sets(v.name)}
 
+    @api.get("/sources/{vault}")
+    def sources(vault: str) -> dict[str, object]:
+        # Quellen-Liste eines Vaults für die Management-Ansicht (neueste zuerst).
+        # SourceStore pro Request (sqlite3 thread-gebunden). raw_md_path bewusst
+        # nicht ausgeliefert (intern); der Raw-Download läuft ohnehin über
+        # /source/{vault}/{source_id}/raw.
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        recs = store.list_by_vault(v.name)
+        return {
+            "vault": v.name,
+            "sources": [
+                {
+                    "source_id": r.id,
+                    "type": r.type,
+                    "url": r.url,
+                    "title": r.title,
+                    "fetched_at": r.fetched_at,
+                }
+                for r in recs
+            ],
+        }
+
     app.include_router(api)
 
     @app.get("/api/health")  # bewusst ohne Token-Pflicht (Monitoring)

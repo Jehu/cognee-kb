@@ -154,3 +154,8 @@ export async function loadNodeSets(vault) {
   const data = await api(`/api/node-sets/${encodeURIComponent(vault)}`);
   return Array.isArray(data.node_sets) ? data.node_sets : [];
 }
+
+export async function loadSources(vault) {
+  const data = await api(`/api/sources/${encodeURIComponent(vault)}`);
+  return Array.isArray(data.sources) ? data.sources : [];
+}
