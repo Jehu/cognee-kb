@@ -21,6 +21,7 @@ uv run pytest tests/test_worker.py::test_process_one_snippet_full_chain  # ein T
 uv run pytest -k worker                    # nach Namen filtern
 
 uv run kb ingest <vault> <url|text|datei>  # in Queue legen
+uv run kb import <vault> <dir|datei>       # .md/.txt-Bestand migrieren (--dry-run, --node-set)
 uv run kb worker <instance>                # Standalone-Worker (local | cloud)
 uv run kb query <vault> "Frage"            # direkter Query (lädt cognee)
 uv run kb serve-instance <instance>        # Instance Service (127.0.0.1:8801/8802)
