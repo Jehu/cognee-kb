@@ -67,13 +67,73 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
 # shared_kuzu_lock=False (Default) einen ThreadPoolExecutor für Kuzu, d. h.
 # cognify (Schreiben) und search (Lesen) liefen im selben Prozess concurrency
 # auf EINEM geteilten Kuzu-Connection-Objekt (nicht thread-safe). Das ist der
-# offene Punkt aus Spike 020 — Serialisierung via asyncio.Lock geplant (Plan 025).
+# offene Punkt aus Spike 020 — Serialisierung via asyncio.Lock (Plan 025, DONE).
 # Siehe plans/README.md "Spike notes".
+
+_COGNEE_PATCHED = False
+
+
+def _apply_cognee_workarounds() -> None:
+    """Workaround für cognee 0.3.9 + instructor 1.15.3 (idempotent, lazy).
+
+    cognee.infrastructure.llm.utils.test_llm_connection reicht `response_model=str`
+    an instructor. instructor 1.15.3 ruft im OpenAI-v2-JSON-Handler
+    `str.model_json_schema()` auf (ohne Simple-Type-Guard) -> AttributeError.
+    cognee führt diesen Pre-Flight bei JEDEM cognify aus
+    (setup_and_check_environment) -> sonst scheitert jeder Ingest.
+    Wir ersetzen `str` durch ein semantisch äquivalentes Pydantic-Modell.
+    cognee ist auf 0.3.9 gepinnt, daher ist dieses Patch-Ziel stabil.
+    """
+    global _COGNEE_PATCHED
+    if _COGNEE_PATCHED:
+        return
+
+    from pydantic import BaseModel
+
+    class _ConnectionProbe(BaseModel):
+        value: str
+
+    async def _test_llm_connection_fixed() -> None:
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
+        from cognee.shared.logging_utils import get_logger
+
+        log = get_logger()
+        try:
+            await LLMGateway.acreate_structured_output(
+                text_input="test",
+                system_prompt='Respond with JSON: {"value": "test"}',
+                response_model=_ConnectionProbe,
+            )
+        except Exception as e:  # noqa: BLE001 — wie das Original: loggen + weiterwerfen
+            log.error(e)
+            log.error("Connection to LLM could not be established.")
+            raise
+
+    # Tests mocken cognee (SimpleNamespace, kein echtes Paket) — dann Überspringen.
+    import sys
+
+    try:
+        import cognee.infrastructure.llm.utils as _llm_utils
+    except ImportError:
+        return
+
+    _COGNEE_PATCHED = True
+    setattr(_llm_utils, "test_llm_connection", _test_llm_connection_fixed)  # noqa: B010
+    # Auch bereits gebundene `from … import test_llm_connection`-Referenzen ersetzen.
+    for _modname in (
+        "cognee.modules.pipelines.layers.setup_and_check_environment",
+        "cognee.api.health",
+    ):
+        _mod = sys.modules.get(_modname)
+        if _mod is not None and hasattr(_mod, "test_llm_connection"):
+            setattr(_mod, "test_llm_connection", _test_llm_connection_fixed)  # noqa: B010
 
 
 async def ingest(instance: Instance, file_path: Path, dataset: str, node_sets: list[str]) -> None:
     assert_instance_env(instance)
     import cognee  # lazy: erst nach load_instance_env importieren
+
+    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
@@ -84,6 +144,8 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
     assert_instance_env(instance)
     import cognee
     from cognee import SearchType
+
+    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         results = await cognee.search(
@@ -158,6 +220,8 @@ async def query_with_sources(
     assert_instance_env(instance)
     import cognee
     from cognee import SearchType
+
+    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         results = await cognee.search(
