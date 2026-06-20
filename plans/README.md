@@ -31,10 +31,14 @@ row when done.
 | 018  | Structured logging + request correlation | P3 | M | — | DONE |
 | 019  | Reduce /api/health info disclosure | P3 | S | — | DONE |
 | 020  | [spike] Kuzu concurrency under cognify+search | P3 | M | — | DONE |
-| 021  | [direction] Re-ingest / Markdown-KB migration | P2 | M | — | TODO |
-| 022  | [direction] Sources management (list/delete) | P3 | S–M | — | TODO |
-| 023  | [direction] Spaced-Repetition (SM-2) layer | P3 | M–L | — | TODO |
-| 024  | [direction] Source connectors (PDF/X/LinkedIn) | P3 | S | — | TODO |
+| 021  | [direction] Re-ingest / Markdown-KB migration | P2 | M | — | DONE |
+| 022  | [direction] Sources management (list/delete) | P3 | S–M | — | DONE |
+| 023  | [direction] Spaced-Repetition (SM-2) layer | P3 | M–L | — | DONE |
+| 024  | [direction] Source connectors (PDF/X/LinkedIn) | P3 | S | — | DONE |
+| 025  | [spike follow-up] Serialize cognee access (asyncio.Lock) | P2 | S | 020 | TODO |
+| 026  | [direction follow-up] `kb import` Markdown migration | P2 | S | — | TODO |
+| 027  | [direction follow-up] Sources list (delete separat) | P2 | S | — | TODO |
+| 028  | [direction follow-up] PDF connector | P3 | S | 004 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).

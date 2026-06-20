@@ -67,3 +67,27 @@ because of them).
 - PDF is the recommended first build; X/LinkedIn likely stay rejected (record
   why, so they're not re-proposed). Each connector that's built must respect
   plan 004's SSRF guard if it fetches by URL.
+
+---
+
+## Spike result (2026-06-20)
+
+**GO für PDF, NO-GO für X/LinkedIn.**
+
+**Befund (cognee):** cognee bringt ein natives `PdfDocument`-Modul
+(`cognee/modules/data/processing/document_types/PdfDocument.py`) — `cognee.add()`
+extrahiert PDF-Text selbst. kb muss also nur den Typ erkennen und den Pfad
+durchreichen; keine eigene Extraction-Dep nötig.
+
+**Pro-Connector:**
+- **PDF — GO (klein):** `classify` erkennt `.pdf`-URL/Datei → `fetch_pdf` (oder
+  direkt `cognee.add(pdf_path)`); SSRF-Guard (Plan 004) greift bei URL-Fetch.
+  Höchster Nutzen, geringstes Risiko. → `028-pdf-connector.md`.
+- **X/Twitter — NO-GO:** oEmbed/Scraper-Fragilität + ToS-Risiko + Auth-Aufwand.
+  Workaround: Text manuell als Snippet erfassen (bereits möglich).
+- **LinkedIn — NO-GO:** login-walled, scrape-feindlich, ToS-hostil. Snippet ist
+  der realistische Pfad.
+
+**Interface-Fit:** jeder Connector = ein `classify`-Zweig + ein Fetcher, dispatched
+via `worker._fetch` — die Erweiterungsstelle ist sauber (`SourceRecord.type`
+nimmt `pdf` auf). PDF baut auf Plan 004s SSRF-Guard auf, falls per URL gefetcht.
