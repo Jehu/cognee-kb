@@ -12,10 +12,12 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install uv
       - run: uv sync
-      # Python: fail-closed. Transitive CVE-Pakete (multipart/pyjwt/pillow/
-      # fastapi-users) sind via override-deps in pyproject.toml auf die
-      # gefixten Versionen angehoben (kb nutzt sie nicht direkt).
-      - run: uv run --with pip-audit pip-audit
+      # Python: fail-closed. Transitive CVE-Pakete (multipart/pyjwt/pillow) sind
+      # via override-deps in pyproject.toml auf gefixte Versionen angehoben.
+      # CVE-2025-68481 (fastapi-users) wird geduldet: kb nutzt fastapi-users
+      # gar nicht (nur Bearer-Token via secrets), und cognee 0.3.9 braucht
+      # zwingend fastapi-users v14 — ein Upgrade auf v15 bricht `import cognee`.
+      - run: uv run --with pip-audit pip-audit --ignore-vuln CVE-2025-68481
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: npm install
