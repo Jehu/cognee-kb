@@ -1,6 +1,8 @@
 import asyncio
 import fnmatch
 import hashlib
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -119,12 +121,42 @@ def _is_excluded(f: Path, root: Path, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(f.name, p) or fnmatch.fnmatch(rel_s, p) for p in patterns)
 
 
+_DURATION_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def _parse_cutoff(value: str) -> datetime:
+    """Übersetzt `--only-newer-than` in einen UTC-Zeitstempel (Cutoff).
+
+    Akzeptiert eine Dauer (`7d`, `12h`, `30m`, `2w`) → jetzt minus Dauer, oder
+    ein ISO-Datum (`2026-06-01` bzw. `2026-06-01T12:00:00`) → direkt als Cutoff.
+    Naive Datumsangaben werden als UTC angenommen.
+    """
+    m = re.fullmatch(r"\s*(\d+)\s*([smhdw])\s*", value, re.IGNORECASE)
+    if m:
+        unit = _DURATION_UNITS[m.group(2).lower()]
+        return datetime.now(UTC) - timedelta(**{unit: int(m.group(1))})
+    try:
+        dt = datetime.fromisoformat(value.strip())
+    except ValueError as e:
+        raise typer.BadParameter(
+            "--only-newer-than: Dauer (z. B. 7d/12h/30m/2w) oder ISO-Datum "
+            f"(2026-06-01) erwartet, bekam {value!r}"
+        ) from e
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 @app.command("import")
 def import_cmd(
     vault: str,
     path: Path,
     node_set: str = typer.Option(None, "--node-set"),
     exclude: list[str] = typer.Option(None, "--exclude", "-x", help="Glob-Ausschluss (mehrfach)"),
+    only_newer_than: str = typer.Option(
+        None,
+        "--only-newer-than",
+        help="Nur neuer als: Dauer (7d/12h/30m/2w) oder ISO-Datum (2026-06-01)",
+    ),
+    limit: int = typer.Option(0, "--limit", "-n", help="Höchstens N enqueued (0 = unbegrenzt)"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Importiert alle .md/.txt-Dateien unter <path> in einen Vault (Queue).
@@ -133,7 +165,9 @@ def import_cmd(
     einen `file`-Job — der serielle Worker übernimmt Raw-Kopie + cognee-Ingest
     (Serial-Constraint F7 bleibt gewahrt). Duplikate (gleicher Body im selben
     Vault) werden übersprungen. Vault-Routing explizit per Arg (Single-User).
-    `--exclude` filtert per Glob (z. B. `_index.md`, `_*.md`, `drafts/*`).
+
+    Filter/Steuerung: `--exclude` (Glob), `--only-newer-than` (Alter, mtime),
+    `--limit N` (max. N enqueued), `--dry-run` (nur anzeigen).
     """
     try:
         v = get_vault(vault)
@@ -143,6 +177,7 @@ def import_cmd(
     if not path.exists():
         typer.echo(f"Pfad nicht gefunden: {path}", err=True)
         raise typer.Exit(1) from None
+    cutoff = _parse_cutoff(only_newer_than) if only_newer_than else None
 
     if path.is_file():
         files = [path] if path.suffix.lower() in (".md", ".txt") else []
@@ -156,11 +191,17 @@ def import_cmd(
     # einem laufenden Worker). Der Worker prüft ohnehin nochmal authoritativ.
     store = SourceStore(sources_path(v.instance))
     q = None if dry_run else JobQueue(queue_path(v.instance))
-    enqueued = skipped = excluded = 0
+    enqueued = skipped = excluded = too_old = 0
     for f in files:
+        if limit and enqueued >= limit:
+            break
         if _is_excluded(f, path, exclude):
             excluded += 1
             typer.echo(f"  ausgeschlossen: {f.name}")
+            continue
+        if cutoff is not None and datetime.fromtimestamp(f.stat().st_mtime, tz=UTC) < cutoff:
+            too_old += 1
+            typer.echo(f"  zu alt (übersprungen): {f.name}")
             continue
         try:
             body = f.read_text(encoding="utf-8")
@@ -185,7 +226,7 @@ def import_cmd(
     mode = " (--dry-run)" if dry_run else ""
     typer.echo(
         f"Import{mode}: {enqueued} enqueued, {skipped} Duplikate, "
-        f"{excluded} ausgeschlossen -> {v.name}"
+        f"{excluded} ausgeschlossen, {too_old} zu alt -> {v.name}"
     )
 
 
