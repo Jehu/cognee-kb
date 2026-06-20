@@ -35,10 +35,10 @@ row when done.
 | 022  | [direction] Sources management (list/delete) | P3 | S–M | — | DONE |
 | 023  | [direction] Spaced-Repetition (SM-2) layer | P3 | M–L | — | DONE |
 | 024  | [direction] Source connectors (PDF/X/LinkedIn) | P3 | S | — | DONE |
-| 025  | [spike follow-up] Serialize cognee access (asyncio.Lock) | P2 | S | 020 | TODO |
-| 026  | [direction follow-up] `kb import` Markdown migration | P2 | S | — | TODO |
-| 027  | [direction follow-up] Sources list (delete separat) | P2 | S | — | TODO |
-| 028  | [direction follow-up] PDF connector | P3 | S | 004 | TODO |
+| 025  | Serialize cognee access (asyncio.Lock) | P2 | S | 020 | TODO | → #25 |
+| 026  | `kb import` Markdown migration | P2 | S | — | TODO | → #26 |
+| 027  | Sources list (delete separat) | P2 | S | — | TODO | → #27 |
+| 028  | PDF connector | P3 | S | 004 | TODO | → #28 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
