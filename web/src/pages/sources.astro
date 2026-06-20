@@ -24,7 +24,7 @@ import Base from '../layouts/Base.astro';
     const listEl = document.getElementById('list');
     let vaultState = null;
 
-    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📄' };
+    const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
 
     function currentVault() {
       return (vaultState?.vaults || []).find((v) => v.name === vaultSel.value);

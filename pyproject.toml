@@ -12,6 +12,7 @@ dependencies = [
     "fastembed==0.6.0",
     "httpx>=0.28.1",
     "mcp>=1.27",
+    "pypdf>=6.13.3",
     "pyyaml>=6.0.3",
     "trafilatura>=2.1.0",
     "typer>=0.26.7",
