@@ -30,7 +30,7 @@ row when done.
 | 017  | Remove stale CLAUDE.md name-drift note | P3 | S | — | DONE |
 | 018  | Structured logging + request correlation | P3 | M | — | DONE |
 | 019  | Reduce /api/health info disclosure | P3 | S | — | DONE |
-| 020  | [spike] Kuzu concurrency under cognify+search | P3 | M | — | TODO |
+| 020  | [spike] Kuzu concurrency under cognify+search | P3 | M | — | DONE |
 | 021  | [direction] Re-ingest / Markdown-KB migration | P2 | M | — | TODO |
 | 022  | [direction] Sources management (list/delete) | P3 | S–M | — | TODO |
 | 023  | [direction] Spaced-Repetition (SM-2) layer | P3 | M–L | — | TODO |
@@ -89,7 +89,37 @@ addressed by plan 009 / one issue.)
 
 ## Spike notes
 
-- **020 (Kuzu concurrency)**: conclusion recorded here when the spike completes
+- **020 (Kuzu concurrency) — UNSAFE (high confidence, static):** cognify (graph
+  write) and `search` (graph read) running concurrently in the Instance Service
+  are **not** safe under cognee 0.3.9's default config. Evidence chain
+  (`.../cognee/infrastructure/databases/graph/`):
+  1. `get_graph_engine.create_graph_engine` is `@lru_cache` → **one KuzuAdapter
+     per process**, holding **one** `self.connection = Connection(self.db)`.
+  2. `cache_config.shared_kuzu_lock` defaults to **False** (kb never sets it →
+     False), so `KuzuAdapter.query()` takes the `else` branch:
+     `await loop.run_in_executor(self.executor, blocking_query)`.
+  3. `self.executor = ThreadPoolExecutor()` (default `max_workers`, i.e. >1) —
+     so two `query()` calls run `self.connection.execute(...)` **in two threads,
+     concurrently, on the same Connection**.
+  4. Kuzu Connections are not safe for concurrent use from multiple threads
+     (one connection = one in-flight query); the shared connection races.
+  The single-writer invariant kb relies on holds **between processes** (one
+  worker per wall) but **not within** the process: while cognify runs in thread
+  A, an incoming `/query` runs `search` in thread B on the same connection.
+  Triggered whenever a query arrives during an ingest's cognify. Possible
+  effects: "another operation in progress"-style errors, inconsistent read
+  results, or DB lock issues.
+
+  **Empirical confirmation deferred**: a live reproducer needs a real cognify
+  (LLM provider + data + time), which the static chain already makes
+  unnecessary to act on.
+
+  **Fix**: serialize cognee access in `cognee_io` with an `asyncio.Lock` held
+  around `ingest` and `query_with_sources`, so cognify and search can't submit
+  concurrent executor jobs on the shared connection (cost: queries block during
+  ingestion — acceptable for single-user). → follow-up build plan
+  `025-cognee-async-lock.md`. Alternatively set `shared_kuzu_lock=True`, but
+  that pulls in Redis (not deployed here) — the in-process lock is simpler.
   (SAFE / UNSAFE / INCONCLUSIVE).
 - **021–024 (direction)**: each plan records its own go/no-go; update the
   status row accordingly.
