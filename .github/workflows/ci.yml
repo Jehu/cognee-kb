@@ -19,7 +19,7 @@ jobs:
       # zwingend fastapi-users v14 — ein Upgrade auf v15 bricht `import cognee`.
       - run: uv run --with pip-audit pip-audit --ignore-vuln CVE-2025-68481
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - run: npm install
         working-directory: web
       # Web: nur auf high/critical failen (low wird manuell triagiert).
@@ -46,7 +46,7 @@ jobs:
       - run: uv sync
       - run: uv run pytest
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - run: npm install
         working-directory: web
       - run: npm test
