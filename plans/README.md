@@ -37,7 +37,7 @@ row when done.
 | 024  | [direction] Source connectors (PDF/X/LinkedIn) | P3 | S | — | DONE |
 | 025  | Serialize cognee access (asyncio.Lock) | P2 | S | 020 | DONE | → #25 |
 | 026  | `kb import` Markdown migration | P2 | S | — | TODO | → #26 |
-| 027  | Sources list (delete separat) | P2 | S | — | TODO | → #27 |
+| 027  | Sources list (delete separat) | P2 | S | — | DONE | → #27 |
 | 028  | PDF connector | P3 | S | 004 | TODO | → #28 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
