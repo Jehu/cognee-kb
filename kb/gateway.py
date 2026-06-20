@@ -176,8 +176,14 @@ def create_app() -> FastAPI:
 
     app.include_router(api)
 
-    @app.get("/api/health")  # bewusst ohne Token (Monitoring)
-    async def health() -> dict[str, object]:
+    @app.get("/api/health")  # bewusst ohne Token-Pflicht (Monitoring)
+    async def health(authorization: str | None = Header(default=None)) -> dict[str, object]:
+        # Instanz-/Wall-Namen sind ein Privacy-Signal — unauthentifiziert gibt es
+        # nur ein Gateway-OK; die detaillierte Instanz-Map nur mit gültigem Token.
+        expected = os.environ.get("KB_API_TOKEN")
+        provided = (authorization or "").removeprefix("Bearer ")
+        if not (expected and secrets.compare_digest(provided, expected)):
+            return {"gateway": "ok"}
         instances = {}
         async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT) as client:
             for name, inst in INSTANCES.items():
