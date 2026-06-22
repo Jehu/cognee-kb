@@ -56,18 +56,18 @@ def test_serve_befehle_registriert():
 
 
 def test_restart_target_resolves_wall():
-    from kb.cli import _restart_target
+    from kb.cli import _target_spec
 
-    port, argv, log = _restart_target("local")
+    port, argv, log = _target_spec("local")
     assert port == 8801
     assert argv == ["serve-instance", "local"]
     assert log.name == "serve.log"
 
 
 def test_restart_target_resolves_gateway():
-    from kb.cli import _restart_target
+    from kb.cli import _target_spec
 
-    port, argv, _ = _restart_target("gateway")
+    port, argv, _ = _target_spec("gateway")
     assert port == 8800
     assert argv == ["serve-gateway"]
 

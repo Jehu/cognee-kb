@@ -61,13 +61,19 @@ zeigt im leeren Zustand Beispiel-Fragen und als verwandte Quelle nur den besten
 Chunk-Treffer zur Frage. Die Einstellungen bieten Token-Anzeige sowie einen
 Verbindungstest.
 
-Starten (drei Terminals):
+Starten (ein Befehl, idempotent):
 
 ```sh
-uv run kb serve-instance local
-uv run kb serve-instance cloud
-uv run kb serve-gateway
+uv run kb up                    # alle Dienste detached (local + cloud + gateway)
+uv run kb up local              # nur eine Wall oder 'gateway'
+uv run kb status                # Lauf-Status aller Dienste (Port + PID)
+uv run kb logs gateway          # Live-Logs (tail -f), Strg-C bricht ab
+uv run kb down                  # alle stoppen
 ```
+
+Dienste laufen detached (überleben das Terminal). Logs landen in
+`var/gateway.log` bzw. `var/<wall>/logs/serve.log`. Nach `kb.toml`-Änderungen
+greifen diese erst nach Neustart der betroffenen Prozesse: `kb restart all`.
 
 Zugriff von unterwegs über Tailscale (kein offener Port nötig);
 iOS-Teilen-Sheet → Knowledge Base: siehe `ops/ios-kurzbefehl.md`.

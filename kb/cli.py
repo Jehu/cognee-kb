@@ -1,7 +1,12 @@
 import asyncio
 import fnmatch
 import hashlib
+import os
 import re
+import signal
+import subprocess
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -314,27 +319,148 @@ def serve_gateway() -> None:
     uvicorn.run(gateway.create_app(), host="0.0.0.0", port=GATEWAY_PORT)
 
 
-def _pids_on_port(port: int) -> list[int]:
-    """PIDs, die auf dem TCP-Port LISTEN. Der Port ist der eindeutige Anker —
-    genau der Prozess, der den Port hält, hält auch den Kuzu-Lock (kein
-    fehleranfälliges Prozessnamen-Matching)."""
-    import subprocess
+# --- Process-Orchestrierung (up/down/status/logs/restart) -------------------
+# Gemeinsame Basis für alle Serve-Targets. Der Port ist der eindeutige Anker —
+# genau der Prozess, der den Port hält, hält auch den Kuzu-Lock (kein
+# fehleranfälliges Prozessnamen-Matching).
 
+# Serve-Targets in kanonischer Reihenfolge (Instances zuerst, dann Gateway).
+# `all` und die Default-Reihenfolge für `up`/`status` nutzen diese Liste.
+_ALL_TARGETS: list[str] = [*INSTANCES.keys(), "gateway"]
+
+
+def _resolve_targets(target: str) -> list[str]:
+    """Einzelnes Ziel oder 'all' -> Liste der Serve-Targets. BadParameter bei Unbekannt."""
+    if target == "all":
+        return list(_ALL_TARGETS)
+    if target in _ALL_TARGETS:
+        return [target]
+    raise typer.BadParameter(
+        f"Unbekanntes Ziel {target!r} — erlaubt: {', '.join(_ALL_TARGETS)}, all"
+    )
+
+
+def _target_spec(target: str) -> tuple[int, list[str], Path]:
+    """(Port, serve-Argv, Logdatei) für ein Serve-Target. KeyError bei unbekannt."""
+    if target == "gateway":
+        return GATEWAY_PORT, ["serve-gateway"], ROOT / "var" / "gateway.log"
+    inst = get_instance(target)  # KeyError bei unbekannter Wall
+    return inst.port, ["serve-instance", target], inst.var_dir / "logs" / "serve.log"
+
+
+def _pids_on_port(port: int) -> list[int]:
+    """PIDs, die auf dem TCP-Port LISTEN."""
     try:
         out = subprocess.run(
             ["lsof", "-t", "-i", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True
         ).stdout
     except FileNotFoundError:
-        raise typer.BadParameter("`lsof` nicht gefunden — `kb restart` benötigt lsof") from None
+        raise typer.BadParameter(
+            "`lsof` nicht gefunden — Process-Orchestrierung benötigt lsof"
+        ) from None
     return [int(x) for x in out.split()]
 
 
-def _restart_target(target: str) -> tuple[int, list[str], Path]:
-    """(Port, serve-Argv, Logdatei) für ein Restart-Ziel. KeyError bei unbekannt."""
-    if target == "gateway":
-        return GATEWAY_PORT, ["serve-gateway"], ROOT / "var" / "gateway.log"
-    inst = get_instance(target)  # KeyError bei unbekannter Wall
-    return inst.port, ["serve-instance", target], inst.var_dir / "logs" / "serve.log"
+def _kill_pid(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        pass  # schon weg
+
+
+def _kill_port(port: int, *, grace_s: int = 10) -> list[int]:
+    """Beendet alle Prozesse auf dem Port: SIGTERM, nach Karenz hart SIGKILL.
+    Liefert die beendeten PIDs (leer wenn der Port frei war)."""
+    old = _pids_on_port(port)
+    for pid in old:
+        _kill_pid(pid, signal.SIGTERM)
+    for _ in range(grace_s * 2):
+        if not _pids_on_port(port):
+            break
+        time.sleep(0.5)
+    else:
+        for pid in _pids_on_port(port):
+            _kill_pid(pid, signal.SIGKILL)
+        time.sleep(0.5)
+    return old
+
+
+def _spawn_detached(argv: list[str], log: Path) -> int:
+    """Startet `kb <argv>` detached (überlebt das Ende dieses Befehls). PID."""
+    kb_bin = Path(sys.executable).with_name("kb")  # gleicher venv, kein uv-Overhead
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "a") as f:
+        proc = subprocess.Popen([str(kb_bin), *argv], stdout=f, stderr=f, start_new_session=True)
+    return proc.pid
+
+
+def _wait_port(port: int, *, timeout_s: int = 20) -> bool:
+    """Wartet bis der Port belegt ist. True wenn innerhalb Timeout."""
+    for _ in range(timeout_s * 2):
+        time.sleep(0.5)
+        if _pids_on_port(port):
+            return True
+    return False
+
+
+@app.command()
+def up(target: str = "all") -> None:
+    """Startet Dienste detached (idempotent — läuft etwas schon, wird es nicht doppelt gestartet).
+
+    target: eine Wall (local | cloud), 'gateway', oder 'all' (Default).
+    """
+    for t in _resolve_targets(target):
+        port, argv, log = _target_spec(t)
+        if _pids_on_port(port):
+            typer.echo(f"{t}: läuft bereits (Port {port}) — übersprungen")
+            continue
+        pid = _spawn_detached(argv, log)
+        ready = _wait_port(port)
+        state = "bereit" if ready else f"gestartet, noch nicht bereit — Log: {log}"
+        typer.echo(f"{t}: gestartet -> PID {pid}, Port {port} — {state}")
+
+
+@app.command()
+def down(target: str = "all") -> None:
+    """Stoppt Dienste (SIGTERM, nach Karenz SIGKILL).
+
+    target: eine Wall (local | cloud), 'gateway', oder 'all' (Default).
+    """
+    for t in _resolve_targets(target):
+        port, _argv, _log = _target_spec(t)
+        old = _kill_port(port)
+        gone = ",".join(map(str, old)) if old else "(lief nicht)"
+        typer.echo(f"{t}: beendet {gone} — Port {port} frei")
+
+
+@app.command()
+def status() -> None:
+    """Zeigt den Lauf-Status aller Dienste (Port belegt? PID?)."""
+    for t in _ALL_TARGETS:
+        port, _argv, log = _target_spec(t)
+        pids = _pids_on_port(port)
+        if pids:
+            typer.echo(f"  {t:12s} ✓ läuft   PID {','.join(map(str, pids)):8s}  Port {port}")
+        else:
+            typer.echo(f"  {t:12s} ✗ gestoppt              Port {port} frei")
+
+
+@app.command()
+def logs(target: str) -> None:
+    """Zeigt die letzten Log-Zeilen eines Dienstes und folgt live (tail -f).
+
+    target: eine Wall (local | cloud) oder 'gateway'.
+    """
+    if target not in _ALL_TARGETS:
+        raise typer.BadParameter(
+            f"Unbekanntes Ziel {target!r} — erlaubt: {', '.join(_ALL_TARGETS)}"
+        )
+    _port, _argv, log = _target_spec(target)
+    if not log.is_file():
+        typer.echo(f"Noch keine Log-Datei: {log}", err=True)
+        raise typer.Exit(1)
+    # tail -f — Strg-C bricht ab, der detach laufende Dienst läuft weiter.
+    os.execvp("tail", ["tail", "-n", "50", "-f", str(log)])
 
 
 @app.command()
@@ -348,59 +474,14 @@ def restart(target: str) -> None:
     Schnappschuss vom Start (config.py lädt kb.toml nur beim Import). CLI-Befehle
     wie ingest/query lesen sie hingegen bei jedem Aufruf frisch.
     """
-    import os
-    import signal
-    import subprocess
-    import sys
-    import time
-
-    targets = [*INSTANCES.keys(), "gateway"] if target == "all" else [target]
-    kb_bin = Path(sys.executable).with_name("kb")  # gleicher venv, kein uv-Overhead
-
-    for t in targets:
-        try:
-            port, argv, log = _restart_target(t)
-        except KeyError:
-            raise typer.BadParameter(
-                f"Unbekanntes Ziel {t!r} — erlaubt: {', '.join(INSTANCES)}, gateway, all"
-            ) from None
-
-        def _kill(pid: int, sig: int) -> None:
-            try:
-                os.kill(pid, sig)
-            except ProcessLookupError:
-                pass  # schon weg
-
-        # 1. laufenden Port-Halter beenden: SIGTERM, nach Karenz hart SIGKILL
-        old = _pids_on_port(port)
-        for pid in old:
-            _kill(pid, signal.SIGTERM)
-        for _ in range(20):
-            if not _pids_on_port(port):
-                break
-            time.sleep(0.5)
-        else:
-            for pid in _pids_on_port(port):
-                _kill(pid, signal.SIGKILL)
-            time.sleep(0.5)
-
-        # 2. frisch + detached starten (überlebt das Ende dieses Befehls)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with open(log, "a") as f:
-            proc = subprocess.Popen(
-                [str(kb_bin), *argv], stdout=f, stderr=f, start_new_session=True
-            )
-
-        # 3. kurz auf Bereitschaft warten (Port wieder belegt)
-        ready = False
-        for _ in range(40):  # ~20s
-            time.sleep(0.5)
-            if _pids_on_port(port):
-                ready = True
-                break
+    for t in _resolve_targets(target):
+        port, argv, log = _target_spec(t)
+        old = _kill_port(port)
+        pid = _spawn_detached(argv, log)
+        ready = _wait_port(port)
         gone = ",".join(map(str, old)) if old else "(lief nicht)"
         state = "bereit" if ready else f"gestartet, noch nicht bereit — Log: {log}"
-        typer.echo(f"{t}: beendet {gone} -> PID {proc.pid}, Port {port} — {state}")
+        typer.echo(f"{t}: beendet {gone} -> PID {pid}, Port {port} — {state}")
 
 
 if __name__ == "__main__":
