@@ -20,19 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # uv statt pip — schnell, deterministisch (wie im lokalen Setup).
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-# Deps zuerst (besserer Layer-Cache als Code-everything-at-once).
-COPY pyproject.toml uv.lock ./
+# Code + Deps zusammen — uv sync braucht kb/__init__.py + README.md (build metadata).
+COPY pyproject.toml uv.lock README.md ./
+COPY kb/ kb/
 RUN uv sync --frozen --no-dev
 
-# Anwendungscode + gebautes Web.
-COPY kb/ kb/
-COPY kb.toml ./
-
-# PWA-Dist aus Stage 1 (Gateway serviert sie aus web/dist/).
+# Gebautes Web (Gateway serviert es aus web/dist/).
 COPY --from=web-builder /app/web/dist web/dist/
 
 # Daten-Volumes (var/ = cognee-DBs/Queues, raw/ = Rohschicht).
@@ -47,4 +44,4 @@ EXPOSE 8800
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -sf http://localhost:8800/api/health || exit 1
 
-CMD ["dumb-init", "--", "uv", "run", "kb", "serve"]
+CMD ["dumb-init", "--", "/app/.venv/bin/kb", "serve"]

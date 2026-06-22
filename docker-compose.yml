@@ -25,6 +25,8 @@ services:
 
     # Bei Topologie-Änderung: docker compose restart (lädt kb.toml neu).
     # Strg-C / docker stop sendet SIGTERM — kb serve fährt alle Kinder sauber runter.
+    environment:
+      - KB_FOREGROUND=1   # Subprozess-Logs nach stdout (für docker logs)
     restart: unless-stopped
 
 volumes:

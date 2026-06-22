@@ -149,5 +149,5 @@ Port 8800 (Gateway) wird gepublished, die Instance Services bleiben intern.
 Der Healthcheck (`/api/health`) wird von Docker automatisch überwacht.
 
 Hinweis `local`-Wall: Ollama läuft nicht im Container. Auf dem VPS nur die
-`cloud`-Walls in `kb.toml` definieren (oder Ollama zusätzlich als Service
- starten und `LLM_ENDPOINT` auf dessen Adresse setzen).
+`cloud`-Walls in `kb.toml` definieren (oder Ollama als eigenen Service starten
+und `LLM_ENDPOINT` in `.env.local` auf dessen Adresse setzen).

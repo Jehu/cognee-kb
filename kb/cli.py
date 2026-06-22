@@ -502,15 +502,20 @@ def serve() -> None:
         _load_env_file(env_file)
 
     children: list[subprocess.Popen[bytes]] = []
+    # Im Container (KB_FOREGROUND=1) erben Subprozesse stdout/stderr → Docker
+    # sammelt die Logs. Lokal schreiben sie ins Logfile (für `kb logs <target>`).
+    use_stdout = os.environ.get("KB_FOREGROUND") == "1"
     for t in _ALL_TARGETS:
         _port, argv, log = _target_spec(t)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        # stdout/stderr ins Logfile UND übernehmen (Docker sammelt Container-Logs).
-        f = open(log, "a")  # noqa: SIM115 — hält offen bis Programmende
+        if use_stdout:
+            child_stdout = None  # erbt Parent-stdout
+        else:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            child_stdout = open(log, "a")  # noqa: SIM115 — hält offen bis Programmende
         children.append(
             subprocess.Popen(
                 _kb_argv(*argv),
-                stdout=f,
+                stdout=child_stdout,
                 stderr=subprocess.STDOUT,
                 env=os.environ.copy(),
             )
