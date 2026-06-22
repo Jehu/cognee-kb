@@ -129,3 +129,25 @@ uv run kb serve-mcp local     # bzw. cloud — Instance Service muss laufen
 Registrierung in Claude Code (project-scope, Isolations-Regeln, Verifikation):
 siehe `ops/mcp-setup.md`. Kopiervorlagen: `ops/mcp/local.mcp.json` und
 `ops/mcp/cloud.mcp.json`.
+
+## Phase 4 — Docker (Deployment)
+
+Ein-Container-Setup: `kb serve` startet alle Instance Services + Gateway als
+eigene Subprozesse im Vordergrund (PID 1 = `dumb-init`, leitet SIGTERM weiter).
+`kb.toml`, `.env.*` und die Daten-Volumes werden gemountet — ein
+Topologie- oder Token-Wechsel braucht nur `docker compose restart`, kein Rebuild.
+
+```sh
+# .env.* aus Templates anlegen (wie lokal), dann:
+docker compose up -d --build     # Build + Start
+docker compose logs -f           # Live-Logs aller Dienste
+docker compose restart           # kb.toml-Änderung greift nach Restart
+docker compose down              # Stop (Daten-Volumes bleiben erhalten)
+```
+
+Port 8800 (Gateway) wird gepublished, die Instance Services bleiben intern.
+Der Healthcheck (`/api/health`) wird von Docker automatisch überwacht.
+
+Hinweis `local`-Wall: Ollama läuft nicht im Container. Auf dem VPS nur die
+`cloud`-Walls in `kb.toml` definieren (oder Ollama zusätzlich als Service
+ starten und `LLM_ENDPOINT` auf dessen Adresse setzen).

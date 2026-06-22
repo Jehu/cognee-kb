@@ -484,5 +484,56 @@ def restart(target: str) -> None:
         typer.echo(f"{t}: beendet {gone} -> PID {pid}, Port {port} — {state}")
 
 
+@app.command()
+def serve() -> None:
+    """Startet alle Dienste im Vordergrund (für Docker PID 1, lokales Dev).
+
+    Anders als `up` (detached) läuft dieser Befehl im Vordergrund und wartet
+    auf alle Kind-Prozesse. Jede Instance läuft im eigenen Subprozess (nötig:
+    cognee hält DATA_ROOT etc. prozess-global in os.environ, zwei Instances
+    im selben Prozess würden sich überschreiben). Strg-C / SIGTERM fährt alle
+    sauber herunter.
+    """
+    import signal
+
+    # Env für das Gateway laden (die Subprozesse laden ihre eigene Env).
+    env_file = ROOT / ".env.gateway"
+    if env_file.is_file():
+        _load_env_file(env_file)
+
+    children: list[subprocess.Popen[bytes]] = []
+    for t in _ALL_TARGETS:
+        _port, argv, log = _target_spec(t)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        # stdout/stderr ins Logfile UND übernehmen (Docker sammelt Container-Logs).
+        f = open(log, "a")  # noqa: SIM115 — hält offen bis Programmende
+        children.append(
+            subprocess.Popen(
+                _kb_argv(*argv),
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                env=os.environ.copy(),
+            )
+        )
+
+    def _shutdown(signum: int, _frame: object) -> None:
+        for c in children:
+            if c.poll() is None:
+                c.send_signal(signum)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # Warten bis alle Kinder beendet sind (Signal-Handler leitet SIGTERM weiter).
+    for c in children:
+        c.wait()
+
+
+def _kb_argv(*args: str) -> list[str]:
+    """Build [kb, *args] mit dem aktuellen Interpreter-Binary."""
+    kb_bin = Path(sys.executable).with_name("kb")
+    return [str(kb_bin), *args]
+
+
 if __name__ == "__main__":
     app()

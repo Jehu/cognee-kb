@@ -1,0 +1,32 @@
+# Ein-Container-Setup: kb serve startet alle Instances + Gateway im selben
+# Container (jeweils eigener Subprozess). kb.toml und .env.* werden gemountet,
+# daher ist ein Topologie-Wechsel (neue Wall/Vault, anderer Port) ein einfacher
+# `docker compose restart` — kein Rebuild nötig.
+
+services:
+  kb:
+    build: .
+    # Image-Tag für manuelles Build/Push (z. B. VPS-Deploy ohne Registry).
+    image: kb:latest
+    container_name: kb
+
+    ports:
+      - "8800:8800"   # Gateway (PWA + API). Instances bleiben intern.
+
+    # kb.toml + .env.* mounten statt backen — Topologie/Token-Wechsel ohne Rebuild.
+    volumes:
+      - ./kb.toml:/app/kb.toml:ro
+      - ./.env.gateway:/app/.env.gateway:ro
+      - ./.env.local:/app/.env.local:ro
+      - ./.env.cloud:/app/.env.cloud:ro
+      # Persistente Daten (cognee-DBs, Queues, Source-DBs, Rohschicht).
+      - kb-var:/app/var
+      - kb-raw:/app/raw
+
+    # Bei Topologie-Änderung: docker compose restart (lädt kb.toml neu).
+    # Strg-C / docker stop sendet SIGTERM — kb serve fährt alle Kinder sauber runter.
+    restart: unless-stopped
+
+volumes:
+  kb-var:
+  kb-raw:

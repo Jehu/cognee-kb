@@ -1,0 +1,32 @@
+# Dependencies und Build-Artefakte (werden im Image gebaut).
+.venv/
+web/node_modules/
+
+# Daten — NIEMALS ins Image (werden als Volumes gemountet).
+var/
+raw/
+
+# Env-Dateien — mounten zur Laufzeit, nicht ins Image backen.
+.env.*
+
+# Git, CI, lokales Tooling.
+.git/
+.gitignore
+.github/
+.pytest_cache/
+.DS_Store
+graphify-out/
+.graphify_*
+.agents/
+skills-lock.json
+
+# Docker-eigene Dateien brauchen nicht ins Image.
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs/Pläne sind kein Runtime-Code.
+docs/
+plans/
+eval/
+ops/
