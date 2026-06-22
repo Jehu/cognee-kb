@@ -2,146 +2,91 @@
 import Base from '../layouts/Base.astro';
 ---
 <Base title="Quellen">
-  <section class="page-intro">
-    <h1>Quellen</h1>
-    <p>Alle erfassten Quellen eines Vaults. Aufräumen noch per CLI/PWA-Ingest.</p>
-  </section>
-  <label for="vault">Vault</label>
-  <select id="vault"></select>
-  <div id="vault-context" class="meta-row"></div>
+  <div class="page-intro">
+    <p class="label" style="margin:0">Erfasste Quellen</p>
+    <h1>Quellen in diesem Vault</h1>
+  </div>
 
-  <div id="error" class="status error hidden"></div>
-  <div id="state" class="meta-row"></div>
-  <ul id="list" class="sources-list"></ul>
+  <label for="vault">Vault</label>
+  <select id="vault" required></select>
+  <div id="vault-hint" class="vault-hint hidden"></div>
+
+  <div id="filters" class="filter-bar mt-16 hidden">
+    <button class="filter-chip active" data-type="">Alle</button>
+    <button class="filter-chip" data-type="web">Web</button>
+    <button class="filter-chip" data-type="youtube">YouTube</button>
+    <button class="filter-chip" data-type="pdf">PDF</button>
+    <button class="filter-chip" data-type="snippet">Notiz</button>
+    <button class="filter-chip" data-type="file">Datei</button>
+  </div>
+
+  <ul id="list" class="src-list"></ul>
+  <div id="error" class="status err hidden"></div>
 
   <script>
-    import { initVaultSelect, loadSources } from '../lib/api.js';
+    import { initVaultSelect } from '../lib/bootstrap.js';
 
     const vaultSel = document.getElementById('vault');
-    const vaultContext = document.getElementById('vault-context');
-    const errorEl = document.getElementById('error');
-    const stateEl = document.getElementById('state');
-    const listEl = document.getElementById('list');
-    let vaultState = null;
-
+    const vaultHint = document.getElementById('vault-hint');
+    const list = document.getElementById('list');
+    const errEl = document.getElementById('error');
+    const filters = document.getElementById('filters');
     const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
+    let all = [];
+    let filter = '';
 
-    function currentVault() {
-      return (vaultState?.vaults || []).find((v) => v.name === vaultSel.value);
+    function currentVault() { return (vaultSel.selectedOptions[0]?.parentNode?.label || '').toLowerCase(); }
+    function showHint() {
+      vaultHint.classList.remove('hidden');
+      const w = currentVault();
+      vaultHint.className = `vault-hint ${w}`;
+      vaultHint.innerHTML = `<span class="wall-dot ${w}"></span> ${w === 'local' ? 'Lokal (Ollama)' : 'Cloud (OpenRouter)'}`;
     }
 
-    function renderVaultContext() {
-      vaultContext.replaceChildren();
-      const vault = currentVault();
-      if (!vault?.instance) return;
-      vaultContext.append(
-        document.createTextNode('Wall '),
-        Object.assign(document.createElement('span'), {
-          className: `wall-badge ${vault.instance}`,
-          textContent: vault.instance,
-        }),
-      );
-    }
+    initVaultSelect(vaultSel).then(s => { if (s.ok) { showHint(); load(); } });
+    vaultSel.addEventListener('change', () => { showHint(); load(); });
 
-    function showAuthRequired() {
-      errorEl.className = 'status error';
-      errorEl.replaceChildren(
-        document.createTextNode('Token fehlt oder ist ungültig. '),
-        Object.assign(document.createElement('a'), {
-          href: '/settings/',
-          textContent: 'Token setzen',
-        }),
-        document.createTextNode(', dann Vaults laden.'),
-      );
-    }
+    filters.addEventListener('click', e => {
+      const b = e.target.closest('.filter-chip');
+      if (!b) return;
+      filter = b.dataset.type;
+      filters.querySelectorAll('.filter-chip').forEach(c => c.classList.toggle('active', c === b));
+      render();
+    });
 
-    async function refresh() {
-      listEl.replaceChildren();
+    async function load() {
       if (!vaultSel.value) return;
-      stateEl.textContent = 'Lade…';
-      errorEl.classList.add('hidden');
+      list.innerHTML = ''; errEl.classList.add('hidden'); filters.classList.add('hidden');
+      const { api } = await import('../lib/api.js');
       try {
-        const sources = await loadSources(vaultSel.value);
-        stateEl.textContent = `${sources.length} Quellen`;
-        if (sources.length === 0) {
-          const li = document.createElement('li');
-          li.className = 'empty';
-          li.textContent = 'Noch keine Quellen in diesem Vault.';
-          listEl.append(li);
-          return;
-        }
-        for (const src of sources) {
-          const icon = TYPE_ICON[src.type] || '📄';
-          const title = src.title || src.type || 'Ohne Titel';
-          const li = document.createElement('li');
-          li.className = 'source-row';
-          const head = document.createElement('div');
-          head.className = 'source-head';
-          head.append(
-            Object.assign(document.createElement('span'), {
-              className: 'source-title',
-              textContent: `${icon} ${title}`,
-            }),
-          );
-          const meta = document.createElement('div');
-          meta.className = 'source-meta';
-          meta.textContent = `${src.type} · ${src.fetched_at || ''}`;
-          li.append(head, meta);
-          listEl.append(li);
-        }
+        const d = await api(`/api/sources/${encodeURIComponent(vaultSel.value)}`);
+        all = d.sources || [];
+        render();
       } catch (e) {
-        stateEl.textContent = '';
-        errorEl.textContent = e.message;
-        errorEl.classList.remove('hidden');
+        errEl.textContent = e.message; errEl.classList.remove('hidden');
       }
     }
 
-    initVaultSelect(vaultSel).then((state) => {
-      vaultState = state;
-      renderVaultContext();
-      if (!state.ok) {
-        showAuthRequired();
+    function render() {
+      list.innerHTML = '';
+      const items = filter ? all.filter(s => s.type === filter) : all;
+      filters.classList.toggle('hidden', !all.length);
+      if (!items.length) {
+        list.innerHTML = `<li class="src-empty">${all.length ? 'Nichts für diesen Filter.' : 'Noch keine Quellen in diesem Vault.'}</li>`;
         return;
       }
-      refresh();
-    });
-
-    vaultSel.addEventListener('change', () => {
-      renderVaultContext();
-      refresh();
-    });
+      for (const s of items) {
+        const li = document.createElement('li'); li.className = 'src-row';
+        const a = document.createElement('a');
+        const isExternal = s.url && /^https?:/.test(s.url);
+        a.href = isExternal ? s.url : `/api/source/${encodeURIComponent(vaultSel.value)}/${encodeURIComponent(s.source_id)}/raw`;
+        if (isExternal) { a.target = '_blank'; a.rel = 'noopener'; }
+        a.innerHTML = `
+          <div class="src-title">${TYPE_ICON[s.type] || '📄'} ${s.title || s.type || 'Ohne Titel'}</div>
+          <div class="src-meta">${s.type}<span class="meta-sep"></span>${(s.fetched_at || '').slice(0, 10)}</div>`;
+        li.appendChild(a);
+        list.appendChild(li);
+      }
+    }
   </script>
-  <style is:global>
-    .sources-list {
-      list-style: none;
-      margin: 1rem 0 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-    .sources-list li.empty {
-      color: var(--muted);
-      font-style: italic;
-      padding: 0.6rem 0;
-    }
-    .source-row {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.55rem 0.7rem;
-      background: color-mix(in srgb, var(--surface) 90%, transparent);
-    }
-    .source-head { display: flex; justify-content: space-between; gap: 0.5rem; }
-    .source-title {
-      font-weight: 600;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .source-meta {
-      margin-top: 0.2rem;
-      color: var(--muted);
-      font-size: 0.78rem;
-    }
-  </style>
 </Base>

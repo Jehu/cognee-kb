@@ -1,157 +1,107 @@
 ---
 import Base from '../layouts/Base.astro';
 ---
-<Base title="Ingest">
-  <section class="page-intro">
-    <h1>Ingest</h1>
-    <p>Quelle, Link oder Notiz erfassen. Die Verarbeitung läuft im Hintergrund.</p>
-  </section>
-  <form id="ingest-form">
+<Base title="Erfassen">
+  <div class="page-intro">
+    <p class="label" style="margin:0">Quelle erfassen</p>
+    <h1>Was willst du festhalten?</h1>
+    <p>Link, Notiz oder Text — die Verarbeitung läuft im Hintergrund.</p>
+  </div>
+
+  <form id="form">
     <label for="vault">Vault</label>
-    <select id="vault"></select>
-    <div id="vault-context" class="meta-row"></div>
+    <select id="vault" required></select>
+    <div id="vault-hint" class="vault-hint hidden"></div>
 
     <label for="content">Quelle oder Notiz</label>
     <textarea id="content" placeholder="Link einfügen oder Notiz schreiben" required autofocus></textarea>
 
-    <details class="advanced-fields">
-      <summary>Metadaten</summary>
-      <label for="node_set">Node-Set</label>
-      <input id="node_set" type="text" list="node-set-suggestions" placeholder="z. B. projekte" autocapitalize="off" autocomplete="off" />
-      <datalist id="node-set-suggestions"></datalist>
-      <p class="field-hint">Tippen oder ein vorhandenes Node-Set aus diesem Vault auswählen.</p>
+    <details style="margin-top:16px">
+      <summary style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-muted);cursor:pointer;padding:8px 0">Metadaten</summary>
+      <label for="node_set" style="margin-top:12px">Node-Set</label>
+      <input id="node_set" type="text" list="ns-sug" placeholder="z.B. projekte" autocapitalize="off" autocomplete="off" />
+      <datalist id="ns-sug"></datalist>
     </details>
 
-    <button type="submit" id="submit" disabled>Quelle speichern</button>
+    <button type="submit" id="submit" class="btn-primary" disabled>Speichern</button>
   </form>
-  <div id="result" class="status hidden"></div>
-  <ol id="job-steps" class="job-steps hidden" aria-live="polite">
+
+  <ol id="steps" class="job-steps hidden">
     <li data-step="accepted">Angenommen</li>
     <li data-step="running">Verarbeitung</li>
     <li data-step="done">Fertig</li>
   </ol>
+  <div id="status" class="status hidden"></div>
 
   <script>
-    import { api, initVaultSelect, loadNodeSets } from '../lib/api.js';
-    import { makeToken, poll as pollJob } from '../lib/poll.js';
-    import { loadCurrentNodeSets } from '../lib/nodesets.js';
+    import { getDefaultVault } from '../lib/api.js';
+    import { initVaultSelect, getVaultMeta, loadNodeSets } from '../lib/bootstrap.js';
 
-    const form = document.getElementById('ingest-form');
+    const form = document.getElementById('form');
     const vaultSel = document.getElementById('vault');
-    const vaultContext = document.getElementById('vault-context');
-    const nodeSetSuggestions = document.getElementById('node-set-suggestions');
-    const result = document.getElementById('result');
-    const jobSteps = document.getElementById('job-steps');
+    const vaultHint = document.getElementById('vault-hint');
+    const nsSug = document.getElementById('ns-sug');
     const submit = document.getElementById('submit');
-    let vaultReady = false;
-    let vaultState = null;
-    // Aktiver Poll-Token: ein neuer Submit cancelt den vorherigen, damit zwei
-    // Polls nicht denselben Status-Sink (#result/#job-steps) überschreiben.
-    let activeToken = null;
+    const status = document.getElementById('status');
+    const steps = document.getElementById('steps');
+    let ready = false;
+    let pollAbort = false;
 
-    // Submit erst freigeben, wenn die Vault-Auswahl befüllt ist —
-    // sonst ginge ein Submit mit leerem Vault raus.
-    initVaultSelect(vaultSel).then((state) => {
-      vaultState = state;
-      vaultReady = state.ok;
-      submit.disabled = !state.ok;
-      renderVaultContext();
-      if (state.ok) refreshNodeSetSuggestions();
-      if (!state.ok) showAuthRequired();
+    function setStatus(text, cls = '') {
+      status.className = `status ${cls}`.trim();
+      status.textContent = text;
+      status.classList.remove('hidden');
+    }
+
+    function setStep(state) {
+      steps.classList.remove('hidden');
+      for (const li of steps.children) li.className = '';
+      if (state === 'accepted') steps.querySelector('[data-step="accepted"]').className = 'active';
+      if (state === 'running') {
+        steps.querySelector('[data-step="accepted"]').className = 'done';
+        steps.querySelector('[data-step="running"]').className = 'active';
+      }
+      if (state === 'done') steps.querySelectorAll('li').forEach(li => li.className = 'done');
+    }
+
+    function currentVault() { return (vaultSel.selectedOptions[0]?.parentNode?.label || '').toLowerCase(); }
+    function showVaultHint() {
+      vaultHint.classList.remove('hidden');
+      const w = currentVault();
+      vaultHint.className = `vault-hint ${w}`;
+      vaultHint.innerHTML = `<span class="wall-dot ${w}"></span> ${
+        w === 'local' ? 'Bleibt auf diesem Gerät · Ollama (lokal)'
+        : 'Cloud-Verarbeitung · OpenRouter'}`;
+    }
+
+    initVaultSelect(vaultSel).then(state => {
+      ready = state.ok;
+      submit.disabled = !ready;
+      if (ready) { showVaultHint(); loadNodeSets(vaultSel.value, nsSug); }
     });
 
     vaultSel.addEventListener('change', () => {
-      renderVaultContext();
-      refreshNodeSetSuggestions();
+      showVaultHint();
+      loadNodeSets(vaultSel.value, nsSug);
     });
 
-    document.getElementById('content').addEventListener('input', (ev) => {
-      const value = ev.target.value.trim();
-      submit.textContent = value.startsWith('http://') || value.startsWith('https://')
-        ? 'Link speichern'
-        : 'Quelle speichern';
-    });
-
-    function show(text, cls = '') {
-      result.className = `status ${cls}`.trim();
-      result.textContent = text;
+    function poll(vault, id) {
+      pollAbort = true; const my = pollAbort;
+      (async function tick() {
+        if (my !== pollAbort) return;
+        try {
+          const j = await (await fetch(`/api/jobs/${encodeURIComponent(vault)}/${id}`)).json();
+          if (j.status === 'pending') { setStep('accepted'); setTimeout(tick, 1500); }
+          else if (j.status === 'running') { setStep('running'); setTimeout(tick, 1500); }
+          else if (j.status === 'done') { setStep('done'); setStatus('Fertig.', 'ok'); }
+          else if (j.status === 'failed') { setStatus(`Fehler: ${j.error || 'unbekannt'}`, 'err'); }
+        } catch { setTimeout(tick, 3000); }
+      })();
     }
 
-    function currentVault() {
-      return (vaultState?.vaults || []).find((vault) => vault.name === vaultSel.value);
-    }
-
-    function renderVaultContext() {
-      vaultContext.replaceChildren();
-      const vault = currentVault();
-      if (!vault?.instance) return;
-      vaultContext.append(
-        document.createTextNode('Wall '),
-        Object.assign(document.createElement('span'), {
-          className: `wall-badge ${vault.instance}`,
-          textContent: vault.instance,
-        }),
-      );
-    }
-
-    async function refreshNodeSetSuggestions() {
-      nodeSetSuggestions.replaceChildren();
-      // Staleness-Guard: ein träger Request eines vorher gewählten Vaults darf
-      // nicht dessen Node-Sets einschleusen, während ein anderer Vault aktiv ist.
-      const nodeSets = await loadCurrentNodeSets(
-        vaultSel.value, (v) => vaultSel.value === v, loadNodeSets);
-      if (!nodeSets) return;
-      for (const nodeSet of nodeSets) {
-        const option = document.createElement('option');
-        option.value = nodeSet;
-        nodeSetSuggestions.appendChild(option);
-      }
-    }
-
-    function setStep(status) {
-      jobSteps.classList.remove('hidden');
-      for (const item of jobSteps.querySelectorAll('li')) item.className = '';
-      if (status === 'accepted') jobSteps.querySelector('[data-step="accepted"]').className = 'active';
-      if (status === 'running') {
-        jobSteps.querySelector('[data-step="accepted"]').className = 'done';
-        jobSteps.querySelector('[data-step="running"]').className = 'active';
-      }
-      if (status === 'done') {
-        for (const item of jobSteps.querySelectorAll('li')) item.className = 'done';
-      }
-      if (status === 'failed') jobSteps.querySelector('[data-step="running"]').className = 'failed';
-    }
-
-    function showAuthRequired() {
-      result.className = 'status error';
-      result.replaceChildren(
-        document.createTextNode('Token fehlt oder ist ungültig. '),
-        Object.assign(document.createElement('a'), {
-          href: '/settings/',
-          textContent: 'Token setzen',
-        }),
-        document.createTextNode(', dann Vaults laden.'),
-      );
-    }
-
-    function startPoll(vault, jobId) {
-      // Vorherigen Poll canceln, damit zwei Läufe nicht denselben Sink überschreiben.
-      if (activeToken) activeToken.cancelled = true;
-      const token = makeToken();
-      activeToken = token;
-      pollJob({
-        vault, jobId, token,
-        fetchJob: (v, id) => api(`/api/jobs/${encodeURIComponent(v)}/${id}`),
-        sink: { show, setStep },
-      });
-    }
-
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      if (!vaultReady) {
-        showAuthRequired();
-        return;
-      }
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!ready) return;
       const vault = vaultSel.value;
       const content = document.getElementById('content').value.trim();
       const nodeSet = document.getElementById('node_set').value.trim();
@@ -159,61 +109,28 @@ import Base from '../layouts/Base.astro';
 
       submit.disabled = true;
       setStep('accepted');
-      show('Sende…');
+      setStatus('Sende…');
+
+      const { api, getToken } = await import('../lib/api.js');
       try {
-        const res = await api('/api/ingest', {
+        const r = await api('/api/ingest', {
           method: 'POST',
           body: JSON.stringify({ vault, content, node_set: nodeSet || null }),
         });
         setStep('running');
-        show(`Job #${res.job_id} angenommen (${res.kind}). Warte auf Verarbeitung…`);
+        setStatus(`Job #${r.job_id} angenommen (${r.kind}).`);
         document.getElementById('content').value = '';
-        startPoll(vault, res.job_id);
+        poll(vault, r.job_id);
       } catch (e) {
-        show(e.message, 'error');
+        setStatus(e.message, 'err');
+        steps.classList.add('hidden');
       } finally {
         submit.disabled = false;
       }
     });
   </script>
+
   <style>
-    .advanced-fields {
-      margin-top: 0.8rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.65rem 0.75rem;
-      background: color-mix(in srgb, var(--surface) 78%, transparent);
-    }
-    .advanced-fields summary {
-      color: var(--muted);
-      cursor: pointer;
-      font-weight: 700;
-    }
-    .field-hint {
-      margin: 0.35rem 0 0;
-      color: var(--muted);
-      font-size: 0.8rem;
-      line-height: 1.35;
-    }
-    .job-steps {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0.4rem;
-      margin: 0.75rem 0 0;
-      padding: 0;
-      list-style: none;
-    }
-    .job-steps.hidden { display: none; }
-    .job-steps li {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.45rem;
-      color: var(--muted);
-      text-align: center;
-      font-size: 0.8rem;
-    }
-    .job-steps li.active { color: var(--accent); border-color: var(--accent); }
-    .job-steps li.done { color: var(--ok); border-color: var(--ok); }
-    .job-steps li.failed { color: var(--error); border-color: var(--error); }
+    details { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 0 14px 12px; background: var(--color-surface); }
   </style>
 </Base>

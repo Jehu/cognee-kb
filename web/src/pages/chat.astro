@@ -2,355 +2,124 @@
 import Base from '../layouts/Base.astro';
 ---
 <Base title="Chat">
-  <section class="page-intro">
-    <h1>Chat</h1>
-    <p>Frage einen Vault. Antworten bleiben auf dieser Seite im Verlauf.</p>
-  </section>
+  <div class="page-intro">
+    <p class="label" style="margin:0">Vault befragen</p>
+    <h1>Was möchtest du wissen?</h1>
+  </div>
+
   <label for="vault">Vault</label>
-  <select id="vault"></select>
-  <div id="vault-context" class="meta-row"></div>
+  <select id="vault" required></select>
+  <div id="vault-hint" class="vault-hint hidden"></div>
 
-  <section id="empty-state" class="empty-state">
-    <p>Beispiel-Fragen</p>
-    <button class="sample-question" type="button" data-question="Welche Quellen wurden zuletzt zu diesem Vault hinzugefügt?">Letzte Quellen</button>
-    <button class="sample-question" type="button" data-question="Fasse die wichtigsten Punkte in diesem Vault zusammen.">Zusammenfassung</button>
-    <button class="sample-question" type="button" data-question="Welche offenen Fragen ergeben sich aus den gespeicherten Quellen?">Offene Fragen</button>
-  </section>
-  <div id="history"></div>
+  <div id="empty" class="empty-state mt-16">
+    <h3>Beispiel-Fragen</h3>
+    <p>Eine Frage pro Thread.</p>
+    <button class="sample-q" data-q="Welche Quellen wurden zuletzt hinzugefügt?">Welche Quellen wurden zuletzt hinzugefügt?</button>
+    <button class="sample-q" data-q="Fasse die wichtigsten Punkte zusammen.">Fasse die wichtigsten Punkte zusammen.</button>
+    <button class="sample-q" data-q="Welche offenen Fragen ergeben sich?">Welche offenen Fragen ergeben sich?</button>
+  </div>
 
-  <form id="chat-form">
+  <div id="history" class="chat-history"></div>
+
+  <form id="form">
     <label for="question">Frage</label>
     <textarea id="question" placeholder="Was möchtest du wissen?" required></textarea>
-    <button type="submit" id="submit" disabled>Fragen</button>
+    <button type="submit" id="submit" class="btn-primary" disabled>Fragen</button>
   </form>
-  <div id="error" class="status error hidden"></div>
+
+  <div id="error" class="status err hidden"></div>
 
   <script>
-    import { api, initVaultSelect, openSourceRaw } from '../lib/api.js';
-    import { safeSourceHref } from '../lib/safe.js';
+    import { initVaultSelect } from '../lib/bootstrap.js';
 
     const vaultSel = document.getElementById('vault');
-    const vaultContext = document.getElementById('vault-context');
-    const emptyState = document.getElementById('empty-state');
-    const historyEl = document.getElementById('history');
-    const form = document.getElementById('chat-form');
-    const questionEl = document.getElementById('question');
+    const vaultHint = document.getElementById('vault-hint');
+    const empty = document.getElementById('empty');
+    const history = document.getElementById('history');
+    const form = document.getElementById('form');
+    const qEl = document.getElementById('question');
     const submit = document.getElementById('submit');
-    const errorEl = document.getElementById('error');
-    let vaultReady = false;
-    let vaultState = null;
-
-    // Submit erst freigeben, wenn die Vault-Auswahl befüllt ist —
-    // sonst ginge ein Submit mit leerem Vault raus.
-    initVaultSelect(vaultSel).then((state) => {
-      vaultState = state;
-      vaultReady = state.ok;
-      submit.disabled = !state.ok;
-      renderVaultContext();
-      if (!state.ok) showAuthRequired();
-    });
-
-    vaultSel.addEventListener('change', renderVaultContext);
-    for (const button of document.querySelectorAll('.sample-question')) {
-      button.addEventListener('click', () => {
-        questionEl.value = button.dataset.question || '';
-        questionEl.focus();
-      });
-    }
-
-    const history = []; // { role, text, vault, sources? } — nur im Speicher
-
-    // Letzten Dateiname ohne .md-Suffix aus einem Pfad extrahieren.
-    function stem(path) {
-      if (!path) return '';
-      const part = path.split('/').pop() || '';
-      return part.endsWith('.md') ? part.slice(0, -3) : part;
-    }
+    const errEl = document.getElementById('error');
+    let ready = false;
+    const hist = [];
 
     const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
 
-    function currentVault() {
-      return (vaultState?.vaults || []).find((vault) => vault.name === vaultSel.value);
+    function escape(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]); }
+    function md(s) {
+      return escape(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
     }
 
-    function renderVaultContext() {
-      vaultContext.replaceChildren();
-      const vault = currentVault();
-      if (!vault?.instance) return;
-      vaultContext.append(
-        document.createTextNode('Wall '),
-        Object.assign(document.createElement('span'), {
-          className: `wall-badge ${vault.instance}`,
-          textContent: vault.instance,
-        }),
-      );
+    function currentVault() { return (vaultSel.selectedOptions[0]?.parentNode?.label || '').toLowerCase(); }
+    function showHint() {
+      vaultHint.classList.remove('hidden');
+      const w = currentVault();
+      vaultHint.className = `vault-hint ${w}`;
+      vaultHint.innerHTML = `<span class="wall-dot ${w}"></span> ${w === 'local' ? 'Lokal (Ollama)' : 'Cloud (OpenRouter)'}`;
     }
 
-    function showAuthRequired() {
-      errorEl.className = 'status error';
-      errorEl.replaceChildren(
-        document.createTextNode('Token fehlt oder ist ungültig. '),
-        Object.assign(document.createElement('a'), {
-          href: '/settings/',
-          textContent: 'Token setzen',
-        }),
-        document.createTextNode(', dann Vaults laden.'),
-      );
-    }
+    function stem(path) { return path ? path.split('/').pop()?.replace(/\.md$/, '') || '' : ''; }
+
+    initVaultSelect(vaultSel).then(s => { ready = s.ok; submit.disabled = !s.ok; if (s.ok) showHint(); });
+    vaultSel.addEventListener('change', showHint);
+
+    for (const b of document.querySelectorAll('.sample-q'))
+      b.addEventListener('click', () => { qEl.value = b.dataset.q; qEl.focus(); });
 
     function render() {
-      historyEl.innerHTML = '';
-      emptyState.classList.toggle('hidden', history.length > 0);
-      for (const msg of history) {
-        const div = document.createElement('article');
-        div.className = `chat-message ${msg.role}`;
-        const bubble = document.createElement('div');
-        bubble.className = 'message-bubble';
-        const meta = document.createElement('div');
-        meta.className = 'message-header';
-        const role = document.createElement('span');
-        role.className = 'role-badge';
-        role.textContent = msg.role === 'user' ? 'Du' : 'KB';
-        const vault = document.createElement('span');
-        vault.className = 'message-vault';
-        vault.textContent = msg.vault;
-        const body = document.createElement('div');
-        body.className = 'message-body';
-        body.textContent = msg.text; // Zeilenumbrüche via CSS white-space
-        meta.append(role, vault);
-        bubble.append(meta, body);
+      empty.classList.toggle('hidden', hist.length > 0);
+      history.innerHTML = '';
+      for (const m of hist) {
+        const div = document.createElement('div');
+        div.className = `msg ${m.role}`;
+        const role = document.createElement('div'); role.className = 'msg-role';
+        role.textContent = m.role === 'user' ? 'Du' : 'KB ' + m.vault;
+        const bub = document.createElement('div'); bub.className = 'msg-bubble msg-body';
+        bub.innerHTML = m.role === 'user' ? escape(m.text) : md(m.text);
 
-        // Quellen-Sektion nur für Assistant-Nachrichten
-        if (msg.role === 'assistant') {
-          const sources = msg.sources || [];
-          const sec = document.createElement('div');
-          sec.className = 'sources';
-          if (sources.length === 0) {
-            const none = document.createElement('span');
-            none.className = 'sources-none';
-            none.textContent = 'Keine Quelle gefunden';
-            sec.appendChild(none);
-          } else {
-            const label = document.createElement('span');
-            label.className = 'sources-label';
-            label.textContent = 'verwandte Quellen';
-            sec.appendChild(label);
-            for (const src of sources) {
-              const icon = TYPE_ICON[src.type] || '📄';
-              const displayTitle = src.title || stem(src.raw_md_path) || src.type;
-              const safeHref = safeSourceHref(src.url);
-
-              if (safeHref) {
-                // Web / YouTube: externer Link als <a> (nur http(s), nie javascript:/data:)
-                const chip = document.createElement('a');
-                chip.className = 'source-chip';
-                chip.href = safeHref;
-                chip.target = '_blank';
-                chip.rel = 'noopener noreferrer';
-                // textContent verhindert XSS — Titel/Locator werden nie via innerHTML gesetzt
-                chip.textContent = `${icon} ${displayTitle}${src.locator ? ` · ${src.locator}` : ''}`;
-                sec.appendChild(chip);
-              } else {
-                // Snippet / File: tokengeschützter Raw-Download via Header
-                const chip = document.createElement('button');
-                chip.className = 'source-chip';
-                chip.type = 'button';
-                chip.textContent = `${icon} ${displayTitle}${src.locator ? ` · ${src.locator}` : ''}`;
-                // Closure über src und msg.vault
-                const vault = msg.vault;
-                const sourceId = src.source_id;
-                chip.addEventListener('click', () => openSourceRaw(vault, sourceId));
-                sec.appendChild(chip);
-              }
-            }
+        if (m.role === 'kb' && m.sources?.length) {
+          const sec = document.createElement('div'); sec.className = 'sources';
+          sec.innerHTML = '<div class="sources-label">Quellen</div>';
+          for (const s of m.sources) {
+            const title = s.title || stem(s.raw_md_path) || s.type || 'Quelle';
+            const chip = document.createElement(s.url?.startsWith('http') ? 'a' : 'span');
+            chip.className = 'source-chip';
+            if (chip.tagName === 'A') { chip.href = s.url; chip.target = '_blank'; chip.rel = 'noopener'; }
+            chip.textContent = `${TYPE_ICON[s.type] || '📄'} ${title}${s.locator ? ' · ' + s.locator : ''}`;
+            sec.appendChild(chip);
           }
-          bubble.appendChild(sec);
+          bub.appendChild(sec);
         }
-
-        div.appendChild(bubble);
-        historyEl.appendChild(div);
+        div.append(role, bub);
+        history.appendChild(div);
       }
-      historyEl.lastElementChild?.scrollIntoView({ block: 'end' });
+      history.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     }
 
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const question = questionEl.value.trim();
-      if (!question) return;
-      if (!vaultReady) {
-        showAuthRequired();
-        return;
-      }
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const q = qEl.value.trim();
+      if (!q || !ready) return;
       const vault = vaultSel.value;
-
-      errorEl.classList.add('hidden');
-      history.push({ role: 'user', text: question, vault });
+      errEl.classList.add('hidden');
+      hist.push({ role: 'user', text: q, vault });
       render();
-      questionEl.value = '';
+      qEl.value = '';
       submit.disabled = true;
+
+      const { api } = await import('../lib/api.js');
       try {
-        const res = await api('/api/query', {
-          method: 'POST',
-          body: JSON.stringify({ vault, question }),
-        });
-        history.push({ role: 'assistant', text: res.answer, vault: res.vault || vault, sources: res.sources || [] });
+        const r = await api('/api/query', { method: 'POST', body: JSON.stringify({ vault, question: q }) });
+        hist.push({ role: 'kb', text: r.answer, sources: r.sources || [], vault: r.vault || vault });
         render();
       } catch (e) {
-        errorEl.textContent = e.message;
-        errorEl.classList.remove('hidden');
+        errEl.textContent = e.message; errEl.classList.remove('hidden');
       } finally {
         submit.disabled = false;
       }
     });
   </script>
-
-  <style is:global>
-    .empty-state {
-      margin: 1rem 0;
-      padding: 0.8rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--surface) 78%, transparent);
-    }
-    .empty-state p {
-      margin: 0 0 0.5rem;
-      color: var(--muted);
-      font-size: 0.85rem;
-      font-weight: 700;
-    }
-    .sample-question {
-      margin: 0.35rem 0 0;
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-      text-align: left;
-      font-weight: 600;
-    }
-    .sample-question:hover {
-      border-color: var(--accent);
-      background: color-mix(in srgb, var(--accent) 7%, transparent);
-    }
-    #history {
-      margin: 1.25rem 0 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-    }
-    .chat-message {
-      display: flex;
-      width: 100%;
-    }
-    .chat-message.user {
-      justify-content: flex-end;
-    }
-    .chat-message.assistant {
-      justify-content: flex-start;
-    }
-    .message-bubble {
-      width: fit-content;
-      max-width: min(44rem, 88%);
-      padding: 0.75rem 0.9rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--surface) 92%, black);
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
-    }
-    .chat-message.user .message-bubble {
-      border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-      background: color-mix(in srgb, var(--accent) 16%, var(--surface));
-    }
-    .chat-message.assistant .message-bubble {
-      border-left: 3px solid var(--ok);
-    }
-    .message-header {
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
-      margin-bottom: 0.45rem;
-      color: var(--muted);
-      font-size: 0.76rem;
-      font-weight: 700;
-    }
-    .role-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 1.35rem;
-      padding: 0 0.45rem;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.035);
-      color: var(--text);
-      line-height: 1;
-    }
-    .chat-message.user .role-badge {
-      border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-      color: var(--accent);
-    }
-    .chat-message.assistant .role-badge {
-      border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
-      color: var(--ok);
-    }
-    .message-vault {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .message-body {
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.55;
-    }
-    .sources {
-      margin-top: 0.75rem;
-      padding-top: 0.65rem;
-      border-top: 1px solid var(--border);
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 0.45rem;
-    }
-    .sources-label {
-      font-size: 0.7rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-right: 0.15rem;
-    }
-    .sources-none {
-      font-size: 0.72rem;
-      color: var(--muted);
-      font-style: italic;
-    }
-    .source-chip {
-      display: inline-flex;
-      align-items: center;
-      font-size: 0.72rem;
-      min-height: 1.6rem;
-      padding: 0.15rem 0.55rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--surface) 86%, white);
-      border: 1px solid var(--border);
-      color: var(--accent);
-      cursor: pointer;
-      text-decoration: none;
-      white-space: nowrap;
-      max-width: 18rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-family: inherit;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .source-chip:hover {
-      border-color: var(--accent);
-      background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-    }
-    @media (max-width: 520px) {
-      #history {
-        gap: 0.75rem;
-      }
-      .message-bubble {
-        max-width: 94%;
-      }
-    }
-  </style>
 </Base>

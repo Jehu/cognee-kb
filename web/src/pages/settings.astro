@@ -2,95 +2,69 @@
 import Base from '../layouts/Base.astro';
 ---
 <Base title="Einstellungen">
-  <section class="page-intro">
-    <h1>Einstellungen</h1>
-    <p>Zugriff, Standard-Vault und Verbindung prüfen.</p>
-  </section>
-  <div id="system-status" class="status">Prüfe Systemstatus…</div>
-  <form id="settings-form">
+  <div class="page-intro">
+    <p class="label" style="margin:0">Konfiguration</p>
+    <h1>Zugriff &amp; System</h1>
+  </div>
+
+  <div id="diag"></div>
+
+  <form id="form">
     <label for="token">Zugriffstoken</label>
-    <div class="control-row">
-      <input id="token" type="password" placeholder="Bearer-Token" autocapitalize="off" autocomplete="off" />
-      <button id="toggle-token" class="secondary" type="button">Token anzeigen</button>
-    </div>
+    <input id="token" type="password" placeholder="Bearer-Token" autocapitalize="off" autocomplete="off" />
 
     <label for="vault">Standard-Vault</label>
     <select id="vault"></select>
 
-    <button id="test-connection" class="secondary" type="button">Status neu testen</button>
-    <button type="submit">Speichern</button>
+    <button type="button" id="test" class="btn-secondary btn-block mt-16">Status testen</button>
+    <button type="submit" class="btn-primary">Speichern</button>
   </form>
+
   <div id="result" class="status hidden"></div>
 
   <script>
-    import { initVaultSelect } from '../lib/api.js';
+    import { getDefaultVault, loadHealth, initVaultSelect } from '../lib/api.js';
 
     const tokenEl = document.getElementById('token');
-    const toggleToken = document.getElementById('toggle-token');
-    const testConnection = document.getElementById('test-connection');
     const vaultSel = document.getElementById('vault');
+    const diag = document.getElementById('diag');
     const result = document.getElementById('result');
-    const systemStatus = document.getElementById('system-status');
 
     tokenEl.value = localStorage.getItem('kb_token') || '';
-    refreshStatus();
+    refresh();
 
-    toggleToken.addEventListener('click', () => {
-      const hidden = tokenEl.type === 'password';
-      tokenEl.type = hidden ? 'text' : 'password';
-      toggleToken.textContent = hidden ? 'Token verbergen' : 'Token anzeigen';
-    });
+    document.getElementById('test').addEventListener('click', refresh);
 
-    testConnection.addEventListener('click', refreshStatus);
+    async function refresh() {
+      diag.innerHTML = '';
+      let health;
+      try { health = await loadHealth(); }
+      catch { health = { gateway: 'down', instances: {} }; }
 
-    async function loadHealth() {
-      try {
-        const token = localStorage.getItem('kb_token');
-        // Token mitgeben, damit die Instanz-Map zurückkommt (sonst nur Gateway-OK).
-        const res = await fetch('/api/health', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!res.ok) return 'Gateway: Fehler beim Statusabruf';
-        const health = await res.json();
-        const instances = Object.entries(health.instances || {})
-          .map(([name, status]) => `${name}: ${status}`)
-          .join(', ');
-        return `Gateway: ${health.gateway || 'ok'}${instances ? `\nInstanzen: ${instances}` : ''}`;
-      } catch {
-        return 'Gateway: nicht erreichbar';
+      const add = (name, state) => {
+        const c = document.createElement('div');
+        c.className = `diag-card ${state === 'ok' ? 'ok' : 'down'}`;
+        c.innerHTML = `<span class="diag-name">${name}</span><span class="diag-state ${state}">${state === 'ok' ? 'OK' : 'Down'}</span>`;
+        diag.appendChild(c);
+      };
+      add('Gateway', health.gateway || 'down');
+      for (const [name, state] of Object.entries(health.instances || {}))
+        add(`Wall · ${name}`, state);
+
+      if (localStorage.getItem('kb_token')) {
+        await initVaultSelect(vaultSel);
+      } else {
+        vaultSel.innerHTML = '<option value="">Token setzen</option>';
       }
     }
 
-    async function refreshStatus() {
-      const healthText = await loadHealth();
-      const vaultState = await initVaultSelect(vaultSel);
-      const hasToken = !!localStorage.getItem('kb_token');
-      if (!hasToken) {
-        systemStatus.className = 'status error';
-        systemStatus.textContent = `${healthText}\nAuthentifizierung: Token fehlt. Vaults bleiben gesperrt.`;
-        return;
-      }
-      if (!vaultState.ok) {
-        systemStatus.className = 'status error';
-        systemStatus.textContent = `${healthText}\nAuthentifizierung: Token ungültig. Vaults bleiben gesperrt.`;
-        return;
-      }
-      systemStatus.className = 'status ok';
-      const vaultLabels = (vaultState.vaults || vaultState.names.map((name) => ({ name, instance: '' })))
-        .map((vault) => vault.instance ? `${vault.name} (${vault.instance})` : vault.name)
-        .join(', ');
-      systemStatus.textContent = `${healthText}\nAuthentifizierung: ok\nVaults: ${vaultLabels}`;
-    }
-
-    document.getElementById('settings-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const token = tokenEl.value.trim();
-      if (token) localStorage.setItem('kb_token', token);
-      else localStorage.removeItem('kb_token');
-      if (!vaultSel.disabled && vaultSel.value) localStorage.setItem('kb_vault', vaultSel.value);
-      result.className = 'status ok';
-      result.textContent = 'Gespeichert.';
-      await refreshStatus();
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const t = tokenEl.value.trim();
+      if (t) localStorage.setItem('kb_token', t); else localStorage.removeItem('kb_token');
+      if (vaultSel.value) localStorage.setItem('kb_vault', vaultSel.value);
+      result.className = 'status ok'; result.textContent = 'Gespeichert.'; result.classList.remove('hidden');
+      await refresh();
     });
   </script>
 </Base>

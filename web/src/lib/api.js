@@ -159,3 +159,11 @@ export async function loadSources(vault) {
   const data = await api(`/api/sources/${encodeURIComponent(vault)}`);
   return Array.isArray(data.sources) ? data.sources : [];
 }
+
+export async function loadHealth() {
+  const token = getToken();
+  const res = await fetch('/api/health', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  return res.ok ? res.json() : { gateway: 'down', instances: {} };
+}
