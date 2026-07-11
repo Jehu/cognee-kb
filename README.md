@@ -253,7 +253,9 @@ Eine Abfrage läuft so ab:
 
 Das Gateway auf Port `8800` ist mit einem Bearer-Token geschützt und importiert Cognee nicht. Es proxyt Abfragen an die nur auf `127.0.0.1` erreichbaren Instance Services. Query und Search akzeptieren optional bis zu zehn Collection-IDs: Cognee 1.2.2 schränkt CHUNKS nativ per NodeSet-OR ein, anschließend verwirft `kb` jeden vollständigen Chunk ohne bestätigte, weiterhin gewünschte Quelle. Entfernte Zuordnungen wirken dadurch sofort; neue erst nach erfolgreicher Reindexierung. Ohne Auswahl bleibt die Suche Vault-weit, aber weiterhin auf bekannte Quellen begrenzt; es gibt keinen breiten Fallback. `kb` verwendet Cognee 1.2.2 mit dessen Ladybug-basiertem Graph-Stack. Pro Wall gibt es genau einen Worker; alle Cognee-Zugriffe innerhalb des Prozesses werden zusätzlich serialisiert, damit Ingest und Suche dieselbe Instanz nicht gleichzeitig verändern oder lesen.
 
-Die versionierbare Markdown-Rohschicht unter `raw/<vault>/` bleibt der Exit-Pfad aus Cognee. Quellenrevisionen sind noch nicht aktiviert. Cognee 1.2.2 kann einzelne Quellen löschen und neu indexieren; `kb` nutzt diesen nicht-atomaren Ablauf erst, sobald Queue, Wiederanlauf und sichtbarer Synchronisationsstatus gemeinsam umgesetzt sind. Details stehen in [docs/cognee-source-lifecycle.md](docs/cognee-source-lifecycle.md).
+Die versionierbare Markdown-Rohschicht unter `raw/<vault>/` bleibt der Exit-Pfad aus Cognee. Sammlungsänderungen laufen als quellbezogene Revision durch die serielle Queue: Der bestätigte Indexstand bleibt bis zum erfolgreichen Löschen, erneuten Hinzufügen und Cognifizieren sichtbar; fehlgeschlagene Läufe sind wiederholbar. Details stehen in [docs/cognee-source-lifecycle.md](docs/cognee-source-lifecycle.md).
+
+Installationen von Cognee 0.3.9 dürfen nicht in-place mit 1.2.2 geöffnet werden. Der notwendige Rebuild aus der Rohschicht, die Wall-getrennte Umschaltung und der Rollback sind im [Migrations-Runbook](ops/cognee-1.2-migration.md) beschrieben. Die additive `sources.db`-Migration erzeugt aus historischen freien Node-Set-Namen bewusst keine Sammlungen; bestehende Quellen starten unzugeordnet.
 
 ## Docker und VPS
 

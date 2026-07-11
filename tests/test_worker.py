@@ -253,8 +253,9 @@ async def test_initial_ingest_projects_and_publishes_collection_membership(tmp_p
     two = store.create_collection("privat", "Zwei")
     jid = q.enqueue("privat", "snippet", {"text": "Inhalt", "collection_ids": [one.id, two.id]})
     ingest_mock = AsyncMock(return_value=("dataset-1", "data-1"))
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
-        "kb.cognee_io.ingest", ingest_mock
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.ingest", ingest_mock),
     ):
         await process_one_async(None, q=q, store=store)
 
@@ -291,8 +292,9 @@ async def test_reindex_failure_preserves_indexed_membership_and_stale_job_cannot
     rev2 = store.replace_desired_collections(source.id, []).collection_revision
     q.enqueue_reindex("privat", source.id, rev1)
     delete_mock = AsyncMock(side_effect=RuntimeError("delete failed"))
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
-        "kb.cognee_io.delete_source", delete_mock
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.delete_source", delete_mock),
     ):
         await process_one_async(None, q=q, store=store)
 
@@ -309,8 +311,7 @@ async def test_reindex_deletes_source_data_and_publishes_current_revision(tmp_pa
     raw = tmp_path / "raw.md"
     raw.write_text("Inhalt")
     source = SourceRecord.new(
-        type="snippet", url=None, video_id=None, locator=None,
-        vault="privat", raw_md_path=str(raw)
+        type="snippet", url=None, video_id=None, locator=None, vault="privat", raw_md_path=str(raw)
     )
     store.insert(source)
     store.initialize_collections(
@@ -320,14 +321,14 @@ async def test_reindex_deletes_source_data_and_publishes_current_revision(tmp_pa
     jid = q.enqueue_reindex("privat", source.id, revision)
     delete_mock = AsyncMock()
     ingest_mock = AsyncMock(return_value=("ds-new", "data-new"))
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
-        "kb.cognee_io.delete_source", delete_mock
-    ), patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.delete_source", delete_mock),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         await process_one_async(None, q=q, store=store)
 
-    delete_mock.assert_awaited_once_with(
-        None, "ds-old", "data-old", provenance_node_set=source.id
-    )
+    delete_mock.assert_awaited_once_with(None, "ds-old", "data-old", provenance_node_set=source.id)
     ingest_mock.assert_awaited_once_with(
         None, raw, "privat", node_sets=[source.id, collection.node_set_key]
     )
@@ -346,8 +347,7 @@ async def test_failed_reindex_rolls_back_prior_index_projection(tmp_path):
     raw = tmp_path / "raw.md"
     raw.write_text("Inhalt")
     source = SourceRecord.new(
-        type="snippet", url=None, video_id=None, locator=None,
-        vault="privat", raw_md_path=str(raw)
+        type="snippet", url=None, video_id=None, locator=None, vault="privat", raw_md_path=str(raw)
     )
     store.insert(source)
     store.initialize_collections(
@@ -358,9 +358,11 @@ async def test_failed_reindex_rolls_back_prior_index_projection(tmp_path):
     ingest_mock = AsyncMock(
         side_effect=[RuntimeError("cognify down"), ("ds-rollback", "data-rollback")]
     )
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
-        "kb.cognee_io.delete_source", AsyncMock()
-    ), patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.delete_source", AsyncMock()),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         await process_one_async(None, q=q, store=store)
 
     assert ingest_mock.await_args_list[0].kwargs["node_sets"] == [source.id, new.node_set_key]
@@ -384,8 +386,7 @@ async def test_failed_reindex_records_primary_and_rollback_failure(tmp_path):
     raw = tmp_path / "raw.md"
     raw.write_text("Inhalt")
     source = SourceRecord.new(
-        type="snippet", url=None, video_id=None, locator=None,
-        vault="privat", raw_md_path=str(raw)
+        type="snippet", url=None, video_id=None, locator=None, vault="privat", raw_md_path=str(raw)
     )
     store.insert(source)
     store.initialize_collections(
@@ -396,9 +397,11 @@ async def test_failed_reindex_records_primary_and_rollback_failure(tmp_path):
     ingest_mock = AsyncMock(
         side_effect=[RuntimeError("primary cognify error"), RuntimeError("rollback error")]
     )
-    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
-        "kb.cognee_io.delete_source", AsyncMock()
-    ), patch("kb.cognee_io.ingest", ingest_mock):
+    with (
+        patch("kb.worker.get_vault", return_value=make_vault(tmp_path)),
+        patch("kb.cognee_io.delete_source", AsyncMock()),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
         await process_one_async(None, q=q, store=store)
 
     sync = store.get_collection_sync(source.id)

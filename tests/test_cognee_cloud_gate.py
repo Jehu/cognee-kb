@@ -89,11 +89,10 @@ async def test_cloud_nodeset_delete_and_readd_gate(tmp_path: Path, monkeypatch) 
     )
     await cognee.cognify(datasets=[dataset_name])
 
-    only_a, only_b = await scoped(token_a, [collection_a]), await scoped(
-        token_b, [collection_b]
-    )
-    union_a, union_b = await scoped(token_a, [collection_a, collection_b]), await scoped(
-        token_b, [collection_a, collection_b]
+    only_a, only_b = await scoped(token_a, [collection_a]), await scoped(token_b, [collection_b])
+    union_a, union_b = (
+        await scoped(token_a, [collection_a, collection_b]),
+        await scoped(token_b, [collection_a, collection_b]),
     )
     assert token_a in only_a and token_b not in only_a
     assert token_b in only_b and token_a not in only_b

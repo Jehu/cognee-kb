@@ -215,6 +215,7 @@ def ingest(
     except UnknownVaultError:
         typer.echo(f"Unbekannter Vault: {vault}", err=True)
         raise typer.Exit(1) from None
+    payload: dict[str, object]
     p = Path(content).expanduser()
     if p.is_file():
         # Lokales PDF → eigener PDF-Zweig (pypdf-Extraktion), kein read_text().

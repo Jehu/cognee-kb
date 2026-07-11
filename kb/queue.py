@@ -70,7 +70,7 @@ class JobQueue:
                 "SELECT id FROM jobs WHERE idempotency_key=?", (key,)
             ).fetchone()
         assert row is not None
-        return row[0]
+        return int(row[0])
 
     def claim_next(self) -> Job | None:
         row = self.conn.execute(

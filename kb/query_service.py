@@ -96,8 +96,8 @@ async def answer(
 def _filter_evidence_sources(
     evidence: list[EvidenceChunk], allowed_source_ids: set[str]
 ) -> tuple[list[EvidenceChunk], list[GapSignal]]:
-    filtered = []
-    gaps = []
+    filtered: list[EvidenceChunk] = []
+    gaps: list[GapSignal] = []
     for item in evidence:
         for source_id in item.source_ids:
             if source_id not in allowed_source_ids:

@@ -302,12 +302,32 @@ def test_legacy_sources_start_synced_and_unassigned(tmp_path):
              'privat','raw/privat/legacy.md');
     """)
     conn.close()
+    before = (
+        sqlite3.connect(db_path)
+        .execute("SELECT id,type,url,video_id,locator,fetched_at,vault,raw_md_path FROM sources")
+        .fetchall()
+    )
     store = SourceStore(db_path)
     state = store.get_collection_sync("legacy")
     assert (state.collection_revision, state.indexed_collection_revision) == (0, 0)
     assert state.collection_sync_status == "synced"
     assert store.desired_collection_ids("legacy") == []
     assert store.pending_reindex_events() == []
+    assert store.list_collections("privat", include_archived=True) == []
+    store.close()
+
+    # Wiederholte Initialisierung ist wirkungslos und erhält alle Altspalten.
+    SourceStore(db_path).close()
+    conn = sqlite3.connect(db_path)
+    after = conn.execute(
+        "SELECT id,type,url,video_id,locator,fetched_at,vault,raw_md_path FROM sources"
+    ).fetchall()
+    assert after == before
+    assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert conn.execute("SELECT COUNT(*) FROM collections").fetchone() == (0,)
+    assert conn.execute("SELECT COUNT(*) FROM source_desired_collections").fetchone() == (0,)
+    conn.close()
 
 
 def test_concurrent_normalized_label_creation_has_one_winner(tmp_path):
