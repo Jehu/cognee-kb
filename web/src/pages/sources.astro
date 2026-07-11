@@ -19,12 +19,18 @@ import Base from '../layouts/Base.astro';
     <button class="filter-chip" data-type="snippet">Notiz</button>
     <button class="filter-chip" data-type="file">Datei</button>
   </div>
+  <section id="source-collection-filters" class="collection-control hidden" aria-labelledby="source-collections-label">
+    <h2 id="source-collections-label" class="label">Nach Sammlungen filtern</h2>
+    <div id="collection-filter"></div>
+  </section>
 
   <ul id="list" class="src-list"></ul>
   <div id="error" class="status err hidden"></div>
 
   <script>
     import { initVaultSelect } from '../lib/bootstrap.js';
+    import { filterSources, mountCollectionSelector } from '../lib/collections.js';
+    import { loadSourceCollections, reassignSourceCollections } from '../lib/api.js';
 
     const vaultSel = document.getElementById('vault');
     const vaultHint = document.getElementById('vault-hint');
@@ -34,6 +40,12 @@ import Base from '../layouts/Base.astro';
     const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
     let all = [];
     let filter = '';
+    let collectionFilter = [];
+    const collectionFilterRoot = document.getElementById('source-collection-filters');
+    const collectionSelector = mountCollectionSelector(document.getElementById('collection-filter'), {
+      allowCreate: false,
+      onChange(ids) { collectionFilter = ids; render(); },
+    });
 
     function currentVault() { return (vaultSel.selectedOptions[0]?.parentNode?.label || '').toLowerCase(); }
     function showHint() {
@@ -44,7 +56,7 @@ import Base from '../layouts/Base.astro';
     }
 
     initVaultSelect(vaultSel).then(s => { if (s.ok) { showHint(); load(); } });
-    vaultSel.addEventListener('change', () => { showHint(); load(); });
+    vaultSel.addEventListener('change', () => { showHint(); collectionFilter = []; collectionSelector.setVault(vaultSel.value); load(); });
 
     filters.addEventListener('click', e => {
       const b = e.target.closest('.filter-chip');
@@ -61,6 +73,15 @@ import Base from '../layouts/Base.astro';
       try {
         const d = await api(`/api/sources/${encodeURIComponent(vaultSel.value)}`);
         all = d.sources || [];
+        await Promise.all(all.map(async (source) => {
+          try {
+            const assignments = await loadSourceCollections(vaultSel.value, source.source_id);
+            source.assignments = assignments;
+            source.collection_ids = assignments.desired_collections.map((c) => c.id);
+          } catch { source.assignments = null; source.collection_ids = []; }
+        }));
+        collectionFilterRoot.classList.remove('hidden');
+        await collectionSelector.setVault(vaultSel.value);
         render();
       } catch (e) {
         errEl.textContent = e.message; errEl.classList.remove('hidden');
@@ -69,7 +90,7 @@ import Base from '../layouts/Base.astro';
 
     function render() {
       list.innerHTML = '';
-      const items = filter ? all.filter(s => s.type === filter) : all;
+      const items = filterSources(all, filter, collectionFilter);
       filters.classList.toggle('hidden', !all.length);
       if (!items.length) {
         list.innerHTML = `<li class="src-empty">${all.length ? 'Nichts für diesen Filter.' : 'Noch keine Quellen in diesem Vault.'}</li>`;
@@ -77,16 +98,65 @@ import Base from '../layouts/Base.astro';
       }
       for (const s of items) {
         const li = document.createElement('li'); li.className = 'src-row';
+        li.dataset.sourceId = s.source_id;
         const a = document.createElement('a');
         const isExternal = s.url && /^https?:/.test(s.url);
         a.href = isExternal ? s.url : `/api/source/${encodeURIComponent(vaultSel.value)}/${encodeURIComponent(s.source_id)}/raw`;
         if (isExternal) { a.target = '_blank'; a.rel = 'noopener'; }
-        a.innerHTML = `
-          <div class="src-title">${TYPE_ICON[s.type] || '📄'} ${s.title || s.type || 'Ohne Titel'}</div>
-          <div class="src-meta">${s.type}<span class="meta-sep"></span>${(s.fetched_at || '').slice(0, 10)}</div>`;
+        const title = document.createElement('div'); title.className = 'src-title';
+        title.textContent = `${TYPE_ICON[s.type] || '📄'} ${s.title || s.type || 'Ohne Titel'}`;
+        const meta = document.createElement('div'); meta.className = 'src-meta';
+        meta.textContent = `${s.type || 'Quelle'} · ${(s.fetched_at || '').slice(0, 10)}`;
+        const chips = document.createElement('div'); chips.className = 'collection-chip-list';
+        for (const collection of s.assignments?.desired_collections || []) {
+          const chip = document.createElement('span'); chip.className = 'collection-chip';
+          chip.textContent = collection.label; chips.appendChild(chip);
+        }
+        if (s.assignments?.sync_status && s.assignments.sync_status !== 'synced') {
+          const sync = document.createElement('span'); sync.className = `sync-state ${s.assignments.sync_status}`;
+          sync.textContent = s.assignments.sync_status === 'failed' ? 'Synchronisierung fehlgeschlagen' : 'Wird synchronisiert';
+          chips.appendChild(sync);
+        }
+        a.append(title, meta, chips);
         li.appendChild(a);
+        const edit = document.createElement('button'); edit.className = 'btn-secondary btn-sm';
+        edit.type = 'button'; edit.textContent = 'Sammlungen bearbeiten';
+        edit.addEventListener('click', () => openEditor(s, li, edit));
+        li.appendChild(edit);
         list.appendChild(li);
       }
+    }
+
+    async function openEditor(source, row, trigger) {
+      row.querySelector('.source-collection-editor')?.remove();
+      const editor = document.createElement('div'); editor.className = 'source-collection-editor';
+      const selectorHost = document.createElement('div'); editor.appendChild(selectorHost);
+      const actions = document.createElement('div'); actions.className = 'collection-actions';
+      const save = document.createElement('button'); save.className = 'btn-primary btn-sm'; save.textContent = 'Zuordnung speichern';
+      const cancel = document.createElement('button'); cancel.className = 'btn-secondary btn-sm'; cancel.textContent = 'Abbrechen';
+      actions.append(save, cancel); editor.appendChild(actions); row.appendChild(editor);
+      const selector = mountCollectionSelector(selectorHost, {
+        selected: source.collection_ids,
+        selectedRecords: source.assignments?.desired_collections || [],
+        allowCreate: true,
+      });
+      await selector.setVault(vaultSel.value, source.collection_ids, source.assignments?.desired_collections || []);
+      cancel.addEventListener('click', () => { editor.remove(); trigger.focus(); });
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          await reassignSourceCollections(vaultSel.value, source.source_id, selector.getSelected());
+          source.collection_ids = selector.getSelected();
+          source.assignments = await loadSourceCollections(vaultSel.value, source.source_id);
+          editor.remove(); render();
+          list.querySelector(`[data-source-id="${CSS.escape(source.source_id)}"] .btn-secondary`)?.focus();
+        } catch (error) {
+          let state = editor.querySelector('.editor-error');
+          if (!state) { state = document.createElement('div'); state.className = 'status err editor-error'; editor.appendChild(state); }
+          state.textContent = error.message;
+          save.textContent = 'Erneut versuchen'; save.disabled = false; save.focus();
+        }
+      });
     }
   </script>
 </Base>

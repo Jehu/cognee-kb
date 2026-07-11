@@ -11,10 +11,7 @@ async function source(path) {
 test('ingest page exposes a compact capture flow with metadata and job steps', async () => {
   const html = await source('src/pages/index.astro');
   assert.match(html, /class="page-intro"/);
-  assert.match(html, /<details/);
-  assert.match(html, /list="ns-sug"/);
-  assert.match(html, /id="ns-sug"/);
-  assert.match(html, /loadNodeSets/);
+  assert.match(html, /id="capture-collections"/);
   assert.match(html, /id="steps"/);
   assert.match(html, /class="job-steps hidden"/);
   assert.match(html, /Speichern/);

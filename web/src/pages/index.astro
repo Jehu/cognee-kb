@@ -16,12 +16,10 @@ import Base from '../layouts/Base.astro';
     <label for="content">Quelle oder Notiz</label>
     <textarea id="content" placeholder="Link einfügen oder Notiz schreiben" required autofocus></textarea>
 
-    <details style="margin-top:16px">
-      <summary style="font-family:var(--font-mono);font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-muted);cursor:pointer;padding:8px 0">Metadaten</summary>
-      <label for="node_set" style="margin-top:12px">Node-Set</label>
-      <input id="node_set" type="text" list="ns-sug" placeholder="z.B. projekte" autocapitalize="off" autocomplete="off" />
-      <datalist id="ns-sug"></datalist>
-    </details>
+    <section id="capture-collections" class="collection-control" aria-labelledby="capture-collections-label">
+      <h2 id="capture-collections-label" class="label">Sammlungen</h2>
+      <div id="collection-selector"></div>
+    </section>
 
     <button type="submit" id="submit" class="btn-primary" disabled>Speichern</button>
   </form>
@@ -34,13 +32,13 @@ import Base from '../layouts/Base.astro';
   <div id="status" class="status hidden"></div>
 
   <script>
-    import { getDefaultVault } from '../lib/api.js';
-    import { initVaultSelect, getVaultMeta, loadNodeSets } from '../lib/bootstrap.js';
+    import { initVaultSelect } from '../lib/bootstrap.js';
+    import { mountCollectionSelector } from '../lib/collections.js';
 
     const form = document.getElementById('form');
     const vaultSel = document.getElementById('vault');
     const vaultHint = document.getElementById('vault-hint');
-    const nsSug = document.getElementById('ns-sug');
+    const collectionSelector = mountCollectionSelector(document.getElementById('collection-selector'));
     const submit = document.getElementById('submit');
     const status = document.getElementById('status');
     const steps = document.getElementById('steps');
@@ -77,12 +75,12 @@ import Base from '../layouts/Base.astro';
     initVaultSelect(vaultSel).then(state => {
       ready = state.ok;
       submit.disabled = !ready;
-      if (ready) { showVaultHint(); loadNodeSets(vaultSel.value, nsSug); }
+      if (ready) { showVaultHint(); collectionSelector.setVault(vaultSel.value); }
     });
 
     vaultSel.addEventListener('change', () => {
       showVaultHint();
-      loadNodeSets(vaultSel.value, nsSug);
+      collectionSelector.setVault(vaultSel.value);
     });
 
     function poll(vault, id) {
@@ -104,7 +102,6 @@ import Base from '../layouts/Base.astro';
       if (!ready) return;
       const vault = vaultSel.value;
       const content = document.getElementById('content').value.trim();
-      const nodeSet = document.getElementById('node_set').value.trim();
       if (!content) return;
 
       submit.disabled = true;
@@ -115,7 +112,7 @@ import Base from '../layouts/Base.astro';
       try {
         const r = await api('/api/ingest', {
           method: 'POST',
-          body: JSON.stringify({ vault, content, node_set: nodeSet || null }),
+          body: JSON.stringify({ vault, content, collection_ids: collectionSelector.getSelected() }),
         });
         setStep('running');
         setStatus(`Job #${r.job_id} angenommen (${r.kind}).`);
@@ -130,7 +127,4 @@ import Base from '../layouts/Base.astro';
     });
   </script>
 
-  <style>
-    details { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 0 14px 12px; background: var(--color-surface); }
-  </style>
 </Base>

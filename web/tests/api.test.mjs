@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 
-import { initVaultSelect, loadVaults } from '../src/lib/api.js';
+import {
+  createCollection,
+  initVaultSelect,
+  loadCollections,
+  loadVaults,
+  reassignSourceCollections,
+} from '../src/lib/api.js';
 
 function makeSelect() {
   return {
@@ -93,4 +99,21 @@ test('initVaultSelect groups API vaults by wall and keeps the wall visible in op
     ['allgemein', 'allgemein (cloud)'],
     ['business-ki', 'business-ki (cloud)'],
   ]);
+});
+
+test('collection API helpers encode vaults and send stable IDs', async () => {
+  const calls = [];
+  globalThis.fetch = async (path, options = {}) => {
+    calls.push([path, options]);
+    return { status: 200, ok: true, json: async () => ({ collections: [{ id: 'c1' }] }) };
+  };
+
+  assert.deepEqual(await loadCollections('business ki', true), [{ id: 'c1' }]);
+  await createCollection('business ki', ' Projekt ');
+  await reassignSourceCollections('business ki', 'source/1', ['c1']);
+
+  assert.equal(calls[0][0], '/api/collections/business%20ki?include_archived=true');
+  assert.deepEqual(JSON.parse(calls[1][1].body), { label: ' Projekt ' });
+  assert.equal(calls[2][0], '/api/sources/business%20ki/source%2F1/collections');
+  assert.deepEqual(JSON.parse(calls[2][1].body), { collection_ids: ['c1'] });
 });

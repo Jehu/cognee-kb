@@ -21,14 +21,22 @@ import Base from '../layouts/Base.astro';
   </form>
 
   <div id="result" class="status hidden"></div>
+  <section id="collection-settings" aria-labelledby="collection-settings-title">
+    <h2 id="collection-settings-title" class="mt-16">Sammlungen pro Vault</h2>
+    <div id="collection-vaults"></div>
+  </section>
 
   <script>
-    import { getDefaultVault, loadHealth, initVaultSelect } from '../lib/api.js';
+    import {
+      changeCollectionState, initVaultSelect, loadCollections, loadHealth, loadVaults, renameCollection,
+    } from '../lib/api.js';
+    import { collectionControlsVisible, writeCollectionVisibility } from '../lib/collections.js';
 
     const tokenEl = document.getElementById('token');
     const vaultSel = document.getElementById('vault');
     const diag = document.getElementById('diag');
     const result = document.getElementById('result');
+    const collectionVaults = document.getElementById('collection-vaults');
 
     tokenEl.value = localStorage.getItem('kb_token') || '';
     refresh();
@@ -53,9 +61,76 @@ import Base from '../layouts/Base.astro';
 
       if (localStorage.getItem('kb_token')) {
         await initVaultSelect(vaultSel);
+        await renderCollectionSettings();
       } else {
         vaultSel.innerHTML = '<option value="">Token setzen</option>';
+        collectionVaults.replaceChildren();
       }
+    }
+
+    async function renderCollectionSettings() {
+      collectionVaults.replaceChildren();
+      const vaultState = await loadVaults();
+      if (!vaultState.ok) return;
+      for (const vault of vaultState.names) {
+        const section = document.createElement('section'); section.className = 'vault-collection-card';
+        const heading = document.createElement('h3'); heading.textContent = vault;
+        const visibilityLabel = document.createElement('label'); visibilityLabel.className = 'visibility-toggle';
+        const visibility = document.createElement('input'); visibility.type = 'checkbox';
+        visibility.checked = collectionControlsVisible(vault);
+        const visibilityText = document.createElement('span'); visibilityText.textContent = 'Sammlungen anzeigen';
+        visibility.addEventListener('change', () => writeCollectionVisibility(vault, visibility.checked));
+        visibilityLabel.append(visibility, visibilityText);
+        const state = document.createElement('div'); state.className = 'collection-state'; state.role = 'status';
+        state.textContent = 'Sammlungen werden geladen…';
+        const active = document.createElement('div'); active.className = 'collection-management-list';
+        const archivedDetails = document.createElement('details');
+        const archivedSummary = document.createElement('summary'); archivedSummary.textContent = 'Archivierte Sammlungen';
+        const archived = document.createElement('div'); archived.className = 'collection-management-list';
+        archivedDetails.append(archivedSummary, archived);
+        section.append(heading, visibilityLabel, state, active, archivedDetails);
+        collectionVaults.appendChild(section);
+
+        try {
+          const collections = await loadCollections(vault, true);
+          state.textContent = collections.length ? '' : 'Noch keine Sammlungen.';
+          for (const collection of collections) {
+            const row = document.createElement('div'); row.className = 'collection-management-row';
+            const label = document.createElement('span'); label.textContent = `${collection.label} (${collection.source_count || 0})`;
+            const actions = document.createElement('div'); actions.className = 'collection-actions';
+            if (collection.state === 'archived') {
+              const restore = actionButton('Wiederherstellen', async () => {
+                await changeCollectionState(vault, collection.id, 'restore'); await renderCollectionSettings();
+              }, state);
+              actions.appendChild(restore); archived.append(row);
+            } else {
+              const rename = actionButton('Umbenennen', async (button) => {
+                const next = window.prompt('Neuer Name', collection.label);
+                if (!next || next === collection.label) return;
+                const updated = await renameCollection(vault, collection.id, next);
+                collection.label = updated.label;
+                label.textContent = `${updated.label} (${updated.source_count || collection.source_count || 0})`;
+                button.focus();
+              }, state);
+              const archive = actionButton('Archivieren', async () => {
+                await changeCollectionState(vault, collection.id, 'archive'); await renderCollectionSettings();
+              }, state);
+              actions.append(rename, archive); active.append(row);
+            }
+            row.append(label, actions);
+          }
+        } catch (error) { state.textContent = error.message; state.classList.add('err'); }
+      }
+    }
+
+    function actionButton(text, action, state) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary btn-sm'; button.textContent = text;
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try { await action(button); }
+        catch (error) { state.textContent = error.message; state.classList.add('err'); button.disabled = false; button.focus(); }
+      });
+      return button;
     }
 
     document.getElementById('form').addEventListener('submit', async (e) => {

@@ -11,6 +11,11 @@ import Base from '../layouts/Base.astro';
   <select id="vault" required></select>
   <div id="vault-hint" class="vault-hint hidden"></div>
 
+  <section id="chat-collections" class="collection-control" aria-labelledby="chat-collections-label">
+    <h2 id="chat-collections-label" class="label">Antwort auf Sammlungen begrenzen</h2>
+    <div id="collection-selector"></div>
+  </section>
+
   <div id="empty" class="empty-state mt-16">
     <h3>Beispiel-Fragen</h3>
     <p>Eine Frage pro Thread.</p>
@@ -31,6 +36,7 @@ import Base from '../layouts/Base.astro';
 
   <script>
     import { initVaultSelect } from '../lib/bootstrap.js';
+    import { mountCollectionSelector } from '../lib/collections.js';
 
     const vaultSel = document.getElementById('vault');
     const vaultHint = document.getElementById('vault-hint');
@@ -42,6 +48,7 @@ import Base from '../layouts/Base.astro';
     const errEl = document.getElementById('error');
     let ready = false;
     const hist = [];
+    const collectionSelector = mountCollectionSelector(document.getElementById('collection-selector'));
 
     const TYPE_ICON = { web: '🔗', youtube: '▶', snippet: '📄', file: '📄', pdf: '📕' };
 
@@ -63,8 +70,11 @@ import Base from '../layouts/Base.astro';
 
     function stem(path) { return path ? path.split('/').pop()?.replace(/\.md$/, '') || '' : ''; }
 
-    initVaultSelect(vaultSel).then(s => { ready = s.ok; submit.disabled = !s.ok; if (s.ok) showHint(); });
-    vaultSel.addEventListener('change', showHint);
+    initVaultSelect(vaultSel).then(s => {
+      ready = s.ok; submit.disabled = !s.ok;
+      if (s.ok) { showHint(); collectionSelector.setVault(vaultSel.value); }
+    });
+    vaultSel.addEventListener('change', () => { showHint(); collectionSelector.setVault(vaultSel.value, []); });
 
     for (const b of document.querySelectorAll('.sample-q'))
       b.addEventListener('click', () => { qEl.value = b.dataset.q; qEl.focus(); });
@@ -79,6 +89,10 @@ import Base from '../layouts/Base.astro';
         role.textContent = m.role === 'user' ? 'Du' : 'KB ' + m.vault;
         const bub = document.createElement('div'); bub.className = 'msg-bubble msg-body';
         bub.innerHTML = m.role === 'user' ? escape(m.text) : md(m.text || 'Keine belegte Antwort möglich.');
+        if (m.role === 'user' && m.scopeLabels?.length) {
+          const scope = document.createElement('div'); scope.className = 'message-scope';
+          scope.textContent = `Sammlungen: ${m.scopeLabels.join(', ')}`; bub.appendChild(scope);
+        }
 
         if (m.role === 'kb' && m.citations?.length) {
           const citations = document.createElement('ol');
@@ -130,15 +144,19 @@ import Base from '../layouts/Base.astro';
       const q = qEl.value.trim();
       if (!q || !ready) return;
       const vault = vaultSel.value;
+      const collectionIds = collectionSelector.getSelected();
+      const scopeLabels = collectionSelector.getSelectedRecords().map((c) => c.label);
       errEl.classList.add('hidden');
-      hist.push({ role: 'user', text: q, vault });
+      hist.push({ role: 'user', text: q, vault, scopeLabels: [...scopeLabels] });
       render();
       qEl.value = '';
       submit.disabled = true;
 
       const { api } = await import('../lib/api.js');
       try {
-        const r = await api('/api/query', { method: 'POST', body: JSON.stringify({ vault, question: q }) });
+        const r = await api('/api/query', {
+          method: 'POST', body: JSON.stringify({ vault, question: q, collection_ids: collectionIds }),
+        });
         hist.push({
           role: 'kb', text: r.answer, sources: r.sources || [], citations: r.citations || [],
           gaps: r.gaps || [], vault: r.vault || vault

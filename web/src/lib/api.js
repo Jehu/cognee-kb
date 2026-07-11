@@ -155,6 +155,40 @@ export async function loadNodeSets(vault) {
   return Array.isArray(data.node_sets) ? data.node_sets : [];
 }
 
+export async function loadCollections(vault, includeArchived = false) {
+  const suffix = includeArchived ? '?include_archived=true' : '';
+  const data = await api(`/api/collections/${encodeURIComponent(vault)}${suffix}`);
+  return Array.isArray(data.collections) ? data.collections : [];
+}
+
+export function createCollection(vault, label) {
+  return api(`/api/collections/${encodeURIComponent(vault)}`, {
+    method: 'POST', body: JSON.stringify({ label }),
+  });
+}
+
+export function renameCollection(vault, collectionId, label) {
+  return api(`/api/collections/${encodeURIComponent(vault)}/${encodeURIComponent(collectionId)}`, {
+    method: 'PATCH', body: JSON.stringify({ label }),
+  });
+}
+
+export function changeCollectionState(vault, collectionId, action) {
+  return api(`/api/collections/${encodeURIComponent(vault)}/${encodeURIComponent(collectionId)}/${action}`, {
+    method: 'POST',
+  });
+}
+
+export function loadSourceCollections(vault, sourceId) {
+  return api(`/api/sources/${encodeURIComponent(vault)}/${encodeURIComponent(sourceId)}/collections`);
+}
+
+export function reassignSourceCollections(vault, sourceId, collectionIds) {
+  return api(`/api/sources/${encodeURIComponent(vault)}/${encodeURIComponent(sourceId)}/collections`, {
+    method: 'PUT', body: JSON.stringify({ collection_ids: collectionIds }),
+  });
+}
+
 export async function loadSources(vault) {
   const data = await api(`/api/sources/${encodeURIComponent(vault)}`);
   return Array.isArray(data.sources) ? data.sources : [];

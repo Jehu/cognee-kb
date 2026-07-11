@@ -49,7 +49,7 @@ Die PWA wird vom Gateway auf Port `8800` ausgeliefert. Beim ersten Aufruf den `K
 
 ### Über die PWA
 
-Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Optional können Metadaten und ein Node-Set angegeben werden. Der Fortschritt des Queue-Jobs wird direkt angezeigt. Die Gateway-API kann Quellen außerdem bis zu zehn Vault-eigenen Sammlungen zuordnen. Änderungen an einer Zuordnung werden quellbezogen im Hintergrund neu indexiert; der bisher bestätigte Indexstand bleibt bei Fehlern erhalten und kann erneut synchronisiert werden.
+Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Quellen können dabei bis zu zehn Vault-eigenen **Sammlungen** zugeordnet werden; neue Sammlungen lassen sich direkt im Auswahlfeld anlegen. Der Fortschritt des Queue-Jobs wird direkt angezeigt. Auf der Quellen-Seite lassen sich Sammlungen als Filter kombinieren und Zuordnungen bearbeiten. Änderungen werden quellbezogen im Hintergrund neu indexiert; die Oberfläche zeigt den Synchronisationsstand und bietet bei Fehlern einen erneuten Versuch.
 
 Ohne gültigen Gateway-Token bleiben Vault-Auswahl, Capture und Chat gesperrt.
 
@@ -99,7 +99,10 @@ Der Chat erzeugt Antworten ausschließlich aus zuvor gefundenen Evidenz-Chunks. 
 
 - validierte Belege pro Aussage,
 - die zugehörigen Quellen,
+- den beim Absenden gewählten Sammlungsumfang; er bleibt innerhalb eines Vaults für weitere Fragen erhalten und wird beim Vault-Wechsel geleert,
 - erkennbare Wissenslücken wie fehlende, nicht auflösbare oder veraltete Evidenz.
+
+Unter **Einstellungen** lassen sich Sammlungsnamen pro Vault umbenennen, Sammlungen archivieren oder wiederherstellen und die Sammlungsbedienung gerätebezogen ein- oder ausblenden. Das Ausblenden verändert keine gespeicherten Zuordnungen. Archivierte Sammlungen bleiben an vorhandenen Quellen sichtbar, stehen für neue Zuordnungen aber nicht zur Auswahl.
 
 ### Antwort über die CLI
 
