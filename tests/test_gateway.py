@@ -428,3 +428,133 @@ def test_sources_requires_token(client, tmp_path, monkeypatch):
 def test_sources_unknown_vault(client):
     r = client.get("/api/sources/geheim", headers=AUTH)
     assert r.status_code == 404
+
+
+# --- Collections ---
+
+
+def test_collection_lifecycle_is_vault_scoped_and_hides_internal_key(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+
+    created = client.post(
+        "/api/collections/business-mwe", headers=AUTH, json={"label": "  Projekt   A  "}
+    )
+    assert created.status_code == 201
+    collection = created.json()
+    assert collection["label"] == "Projekt A"
+    assert collection["state"] == "active"
+    assert collection["source_count"] == 0
+    assert "node_set_key" not in collection
+
+    listed = client.get("/api/collections/business-mwe", headers=AUTH)
+    assert listed.status_code == 200
+    assert listed.json() == {"vault": "business-mwe", "collections": [collection]}
+
+    collection_id = collection["id"]
+    renamed = client.patch(
+        f"/api/collections/business-mwe/{collection_id}",
+        headers=AUTH,
+        json={"label": "Projekt B"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["id"] == collection_id
+    assert renamed.json()["label"] == "Projekt B"
+
+    archived = client.post(
+        f"/api/collections/business-mwe/{collection_id}/archive", headers=AUTH
+    )
+    assert archived.status_code == 200
+    assert archived.json()["state"] == "archived"
+    assert client.get("/api/collections/business-mwe", headers=AUTH).json()["collections"] == []
+    assert len(
+        client.get(
+            "/api/collections/business-mwe?include_archived=true", headers=AUTH
+        ).json()["collections"]
+    ) == 1
+
+    restored = client.post(
+        f"/api/collections/business-mwe/{collection_id}/restore", headers=AUTH
+    )
+    assert restored.status_code == 200
+    assert restored.json()["state"] == "active"
+
+
+def test_collection_contract_requires_auth_and_known_vault(client):
+    assert client.get("/api/collections/business-mwe").status_code == 401
+    assert client.get("/api/collections/unbekannt", headers=AUTH).status_code == 404
+
+
+def test_collection_validation_conflict_and_cross_vault_rejection(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    first = client.post(
+        "/api/collections/business-mwe", headers=AUTH, json={"label": "Straße"}
+    )
+    assert first.status_code == 201
+    duplicate = client.post(
+        "/api/collections/business-mwe", headers=AUTH, json={"label": " STRASSE "}
+    )
+    assert duplicate.status_code == 409
+    invalid = client.post(
+        "/api/collections/business-mwe", headers=AUTH, json={"label": "bad\u0007label"}
+    )
+    assert invalid.status_code == 422
+    too_long = client.post(
+        "/api/collections/business-mwe", headers=AUTH, json={"label": "x" * 65}
+    )
+    assert too_long.status_code == 422
+
+    collection_id = first.json()["id"]
+    for suffix, method in (("", "patch"), ("/archive", "post"), ("/restore", "post")):
+        kwargs = {"json": {"label": "Fremd"}} if method == "patch" else {}
+        response = getattr(client, method)(
+            f"/api/collections/business-ki/{collection_id}{suffix}", headers=AUTH, **kwargs
+        )
+        assert response.status_code == 404
+
+
+def test_source_collection_view_returns_assignments_counts_and_sync_without_keys(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    store = SourceStore(tmp_path / "cloud_sources.db")
+    store.insert(_src("source-with-collections", "business-mwe", "Quelle"))
+    desired = store.create_collection("business-mwe", "Gewünscht")
+    indexed = store.create_collection("business-mwe", "Indexiert")
+    store.replace_desired_collections("source-with-collections", [desired.id])
+    store.conn.execute(
+        "INSERT INTO source_indexed_collections"
+        "(source_id,collection_id,display_order) VALUES (?,?,0)",
+        ("source-with-collections", indexed.id),
+    )
+    store.conn.commit()
+
+    response = client.get(
+        "/api/sources/business-mwe/source-with-collections/collections", headers=AUTH
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_id"] == "source-with-collections"
+    assert body["collection_revision"] == 1
+    assert body["indexed_collection_revision"] == 0
+    assert body["sync_status"] == "pending"
+    assert [item["id"] for item in body["desired_collections"]] == [desired.id]
+    assert [item["id"] for item in body["indexed_collections"]] == [indexed.id]
+    assert "node_set_key" not in response.text
+
+    listing = client.get("/api/collections/business-mwe", headers=AUTH).json()
+    counts = {item["id"]: item["source_count"] for item in listing["collections"]}
+    assert counts == {desired.id: 1, indexed.id: 0}
+
+
+def test_source_collection_view_rejects_cross_vault_source(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    store = SourceStore(tmp_path / "cloud_sources.db")
+    store.insert(_src("foreign-source", "business-ki", "Fremd"))
+    response = client.get(
+        "/api/sources/business-mwe/foreign-source/collections", headers=AUTH
+    )
+    assert response.status_code == 404

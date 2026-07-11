@@ -30,7 +30,12 @@ from kb.config import (
 from kb.logging_setup import setup_logging
 from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
 from kb.queue import JobQueue
-from kb.sources import SourceStore
+from kb.sources import (
+    CollectionConflictError,
+    CollectionRecord,
+    CollectionValidationError,
+    SourceStore,
+)
 
 HEALTH_TIMEOUT = 2.0
 
@@ -69,6 +74,35 @@ class IngestBody(BaseModel):
 class QueryBody(BaseModel):
     vault: str
     question: str
+
+
+class CollectionLabelBody(BaseModel):
+    label: str
+
+
+def _collection_view(store: SourceStore, collection: CollectionRecord) -> dict[str, object]:
+    """Öffentliche Darstellung ohne den internen Cognee-NodeSet-Schlüssel."""
+    source_count = store.conn.execute(
+        "SELECT COUNT(*) FROM source_desired_collections WHERE collection_id=?",
+        (collection.id,),
+    ).fetchone()[0]
+    return {
+        "id": collection.id,
+        "label": collection.label,
+        "state": collection.state,
+        "source_count": source_count,
+        "created_at": collection.created_at,
+        "updated_at": collection.updated_at,
+    }
+
+
+def _assignment_view(collection: CollectionRecord) -> dict[str, str]:
+    return {"id": collection.id, "label": collection.label, "state": collection.state}
+
+
+def _collection_not_found() -> HTTPException:
+    # Cross-Vault und unbekannt absichtlich gleich behandeln: keine ID-Existenz leaken.
+    return HTTPException(404, "Unbekannte Collection")
 
 
 def create_app() -> FastAPI:
@@ -185,6 +219,69 @@ def create_app() -> FastAPI:
         q = JobQueue(queue_path(v.instance))
         return {"vault": v.name, "node_sets": q.node_sets(v.name)}
 
+    @api.get("/collections/{vault}")
+    def collections(vault: str, include_archived: bool = False) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        records = store.list_collections(v.name, include_archived=include_archived)
+        return {
+            "vault": v.name,
+            "collections": [_collection_view(store, record) for record in records],
+        }
+
+    @api.post("/collections/{vault}", status_code=201)
+    def create_collection(vault: str, body: CollectionLabelBody) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        try:
+            record = store.create_collection(v.name, body.label)
+        except CollectionConflictError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except CollectionValidationError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return _collection_view(store, record)
+
+    @api.patch("/collections/{vault}/{collection_id}")
+    def rename_collection(
+        vault: str, collection_id: str, body: CollectionLabelBody
+    ) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        try:
+            record = store.rename_collection(v.name, collection_id, body.label)
+        except CollectionConflictError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except CollectionValidationError as exc:
+            if "gehört nicht" in str(exc):
+                raise _collection_not_found() from None
+            raise HTTPException(422, str(exc)) from None
+        return _collection_view(store, record)
+
+    def _change_collection_state(
+        vault: str, collection_id: str, *, restore: bool
+    ) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        try:
+            record = (
+                store.restore_collection(v.name, collection_id)
+                if restore
+                else store.archive_collection(v.name, collection_id)
+            )
+        except CollectionValidationError as exc:
+            if "gehört nicht" in str(exc):
+                raise _collection_not_found() from None
+            raise HTTPException(422, str(exc)) from None
+        return _collection_view(store, record)
+
+    @api.post("/collections/{vault}/{collection_id}/archive")
+    def archive_collection(vault: str, collection_id: str) -> dict[str, object]:
+        return _change_collection_state(vault, collection_id, restore=False)
+
+    @api.post("/collections/{vault}/{collection_id}/restore")
+    def restore_collection(vault: str, collection_id: str) -> dict[str, object]:
+        return _change_collection_state(vault, collection_id, restore=True)
+
     @api.get("/sources/{vault}")
     def sources(vault: str) -> dict[str, object]:
         # Quellen-Liste eines Vaults für die Management-Ansicht (neueste zuerst).
@@ -206,6 +303,34 @@ def create_app() -> FastAPI:
                 }
                 for r in recs
             ],
+        }
+
+    @api.get("/sources/{vault}/{source_id}/collections")
+    def source_collections(vault: str, source_id: str) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        source = store.get(source_id)
+        if source is None or source.vault != v.name:
+            raise HTTPException(404, "Unbekannte Quelle")
+        sync = store.get_collection_sync(source_id)
+        desired = [
+            store.get_collection(v.name, collection_id)
+            for collection_id in store.desired_collection_ids(source_id)
+        ]
+        indexed = [
+            store.get_collection(v.name, collection_id)
+            for collection_id in store.indexed_collection_ids(source_id)
+        ]
+        return {
+            "vault": v.name,
+            "source_id": source_id,
+            "desired_collections": [_assignment_view(record) for record in desired],
+            "indexed_collections": [_assignment_view(record) for record in indexed],
+            "collection_revision": sync.collection_revision,
+            "indexed_collection_revision": sync.indexed_collection_revision,
+            "sync_status": sync.collection_sync_status,
+            "sync_error": sync.collection_sync_error,
+            "sync_updated_at": sync.collection_sync_updated_at,
         }
 
     app.include_router(api)
