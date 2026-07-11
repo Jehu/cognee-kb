@@ -153,6 +153,43 @@ def test_retrieve_returns_ranked_evidence_without_graph_completion(monkeypatch):
     assert calls == [{"query_type": "chunks", "query_text": "Frage?", "datasets": ["privat"]}]
 
 
+def test_retrieve_passes_native_nodeset_or_filter_and_bounded_top_k(monkeypatch):
+    calls = []
+
+    class _SearchType:
+        CHUNKS = "chunks"
+
+    async def search(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    fake_cognee = SimpleNamespace(search=search, SearchType=_SearchType)
+    monkeypatch.setitem(sys.modules, "cognee", fake_cognee)
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+
+    evidence = asyncio.run(
+        retrieve(
+            get_instance("local"),
+            "Frage?",
+            ["privat"],
+            node_names=["collection:a", "collection:b"],
+            top_k=500,
+        )
+    )
+
+    assert evidence == []
+    assert calls == [
+        {
+            "query_type": "chunks",
+            "query_text": "Frage?",
+            "datasets": ["privat"],
+            "node_name": ["collection:a", "collection:b"],
+            "node_name_filter_operator": "OR",
+            "top_k": 100,
+        }
+    ]
+
+
 def test_synthesize_evidence_uses_numbered_chunks_and_guard(monkeypatch):
     captured = {}
 
@@ -163,7 +200,6 @@ def test_synthesize_evidence_uses_numbered_chunks_and_guard(monkeypatch):
 
     guard_call = []
     monkeypatch.setattr("kb.cognee_io._call_structured_output", fake_structured)
-    monkeypatch.setattr("kb.cognee_io._apply_cognee_workarounds", lambda: None)
     monkeypatch.setattr(
         "kb.cognee_io.assert_instance_env", lambda instance: guard_call.append(instance)
     )

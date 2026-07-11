@@ -1,13 +1,9 @@
 """Kapselt ALLE Cognee-SDK-Zugriffe. Nichts außerhalb dieses Moduls importiert cognee.
 
-Gegen cognee 0.3.9 verifiziert (Introspektion der installierten Version):
-- cognee.add(data, dataset_name=..., node_set=...) — Parameternamen wie im Plan.
-- cognee.cognify(datasets=[...]) — wie im Plan.
-- cognee.search(query_text=..., query_type=SearchType.GRAPH_COMPLETION,
-  datasets=[...]) — wie im Plan; Rückgabe ist aber list[SearchResult]
-  (Pydantic-Modell mit Feld `search_result`), nicht list[str]. Mit
-  ENABLE_BACKEND_ACCESS_CONTROL=true kommen stattdessen dicts mit dem
-  Key 'search_result' (empirisch, Phase-0-Lauf). `_render` behandelt beides.
+Die Integration zielt auf Cognee 1.2.2. Imports bleiben lazy, damit die Wall-
+Konfiguration vor Cognees globaler Initialisierung gesetzt wird. Suchergebnisse
+werden defensiv normalisiert, weil ACL- und Nicht-ACL-Modus verschiedene Shapes
+liefern können.
 """
 
 import asyncio
@@ -25,12 +21,9 @@ from kb.synthesis import SynthesisResponse
 
 logger = logging.getLogger("kb.cognee_io")
 
-# Serialisiert ALLE cognee-Aufrufe innerhalb eines Prozesses (Spike 020):
-# cognee 0.3.9 führt Kuzu-Operationen auf einer geteilten Connection in einem
-# ThreadPool aus — cognify (Schreiben) und search (Lesen) dürfen daher nicht
-# gleichzeitig bei cognee ankommen. Kosten: Queries blockieren während eines
-# Ingests (single-user tragbar). Bindet sich lazily an den ersten Loop (3.10+),
-# und jedes cognee_io wird prozesslokal auf genau einem Loop ausgeführt.
+# Serialisiert ALLE Cognee-Aufrufe innerhalb eines Prozesses. Auch mit Ladybug
+# bleibt kb bewusst single-writer; die Sperre verhindert konkurrierende Ingest-
+# und Suchzugriffe und bindet sich lazy an den einen Instanz-Loop.
 _COGNEE_LOCK = asyncio.Lock()
 
 # Kompiliert als Konstante: pattern für YAML-Frontmatter source_id-Felder
@@ -65,77 +58,9 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
     assert_instance_env(instance)
 
 
-# Konzept: ein Worker/Instanz + ein Loop — aber ACHTUNG: cognee 0.3.9 nutzt bei
-# shared_kuzu_lock=False (Default) einen ThreadPoolExecutor für Kuzu, d. h.
-# cognify (Schreiben) und search (Lesen) liefen im selben Prozess concurrency
-# auf EINEM geteilten Kuzu-Connection-Objekt (nicht thread-safe). Das ist der
-# offene Punkt aus Spike 020 — Serialisierung via asyncio.Lock (Plan 025, DONE).
-# Siehe plans/README.md "Spike notes".
-
-_COGNEE_PATCHED = False
-
-
-def _apply_cognee_workarounds() -> None:
-    """Workaround für cognee 0.3.9 + instructor 1.15.3 (idempotent, lazy).
-
-    cognee.infrastructure.llm.utils.test_llm_connection reicht `response_model=str`
-    an instructor. instructor 1.15.3 ruft im OpenAI-v2-JSON-Handler
-    `str.model_json_schema()` auf (ohne Simple-Type-Guard) -> AttributeError.
-    cognee führt diesen Pre-Flight bei JEDEM cognify aus
-    (setup_and_check_environment) -> sonst scheitert jeder Ingest.
-    Wir ersetzen `str` durch ein semantisch äquivalentes Pydantic-Modell.
-    cognee ist auf 0.3.9 gepinnt, daher ist dieses Patch-Ziel stabil.
-    """
-    global _COGNEE_PATCHED
-    if _COGNEE_PATCHED:
-        return
-
-    from pydantic import BaseModel
-
-    class _ConnectionProbe(BaseModel):
-        value: str
-
-    async def _test_llm_connection_fixed() -> None:
-        from cognee.infrastructure.llm.LLMGateway import LLMGateway
-        from cognee.shared.logging_utils import get_logger
-
-        log = get_logger()
-        try:
-            await LLMGateway.acreate_structured_output(
-                text_input="test",
-                system_prompt='Respond with JSON: {"value": "test"}',
-                response_model=_ConnectionProbe,
-            )
-        except Exception as e:  # noqa: BLE001 — wie das Original: loggen + weiterwerfen
-            log.error(e)
-            log.error("Connection to LLM could not be established.")
-            raise
-
-    # Tests mocken cognee (SimpleNamespace, kein echtes Paket) — dann Überspringen.
-    import sys
-
-    try:
-        import cognee.infrastructure.llm.utils as _llm_utils
-    except ImportError:
-        return
-
-    _COGNEE_PATCHED = True
-    setattr(_llm_utils, "test_llm_connection", _test_llm_connection_fixed)  # noqa: B010
-    # Auch bereits gebundene `from … import test_llm_connection`-Referenzen ersetzen.
-    for _modname in (
-        "cognee.modules.pipelines.layers.setup_and_check_environment",
-        "cognee.api.health",
-    ):
-        _mod = sys.modules.get(_modname)
-        if _mod is not None and hasattr(_mod, "test_llm_connection"):
-            setattr(_mod, "test_llm_connection", _test_llm_connection_fixed)  # noqa: B010
-
-
 async def ingest(instance: Instance, file_path: Path, dataset: str, node_sets: list[str]) -> None:
     assert_instance_env(instance)
     import cognee  # lazy: erst nach load_instance_env importieren
-
-    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
@@ -146,8 +71,6 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
     assert_instance_env(instance)
     import cognee
     from cognee import SearchType
-
-    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         results = await cognee.search(
@@ -211,20 +134,32 @@ def _extract_source_ids(results: Iterable[object]) -> list[str]:
     return list(seen.keys())
 
 
-async def retrieve(instance: Instance, question: str, datasets: list[str]) -> list[EvidenceChunk]:
+async def retrieve(
+    instance: Instance,
+    question: str,
+    datasets: list[str],
+    *,
+    node_names: list[str] | None = None,
+    top_k: int = 100,
+) -> list[EvidenceChunk]:
     """Liefert gerankte CHUNKS, ohne eine Antwort vom LLM zu erzeugen."""
     assert_instance_env(instance)
     import cognee
     from cognee import SearchType
 
-    _apply_cognee_workarounds()
-
-    async with _COGNEE_LOCK:
-        results = await cognee.search(
-            query_type=SearchType.CHUNKS,
-            query_text=question,
-            datasets=datasets,
+    search_kwargs: dict[str, object] = {
+        "query_type": SearchType.CHUNKS,
+        "query_text": question,
+        "datasets": datasets,
+    }
+    if node_names:
+        search_kwargs.update(
+            node_name=node_names,
+            node_name_filter_operator="OR",
+            top_k=min(max(top_k, 1), 100),
         )
+    async with _COGNEE_LOCK:
+        results = await cognee.search(**search_kwargs)
 
     evidence = []
     for rank, result in enumerate(results, start=1):
@@ -260,7 +195,6 @@ async def synthesize_evidence(
 ) -> SynthesisResponse:
     """Synthetisiert ausschließlich aus nummerierter, bereits gefundener Evidenz."""
     assert_instance_env(instance)
-    _apply_cognee_workarounds()
     blocks = "\n\n".join(f"[{item.evidence_id}]\n{item.text}" for item in evidence)
     prompt = f"Frage:\n{question}\n\nEvidenz:\n{blocks}"
     system_prompt = (
@@ -283,8 +217,6 @@ async def query_with_sources(
     assert_instance_env(instance)
     import cognee
     from cognee import SearchType
-
-    _apply_cognee_workarounds()
 
     async with _COGNEE_LOCK:
         results = await cognee.search(

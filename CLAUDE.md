@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Was das ist
 
-Persönliches Multi-Vault-Knowledge-System auf Basis von **Cognee 0.3.x**. Zwei
+Persönliches Multi-Vault-Knowledge-System auf Basis von **Cognee 1.2.2**. Zwei
 strikt getrennte Verarbeitungs-Instanzen ("Walls") mit eigenem Prozess und
 eigenem LLM, mehrere thematische Vaults darin, serielle Ingest-Queue (SQLite).
 Datenfluss: Input → klassifizieren → Queue → Worker fetcht & schreibt Rohschicht
@@ -57,7 +57,7 @@ die erlaubten LLM-Provider (`MODE_PROVIDERS` in `config.py`):
 Gateway, MCP-Server und Worker-Schleife des Instance Service erreichen cognee nur
 indirekt (HTTP-Proxy bzw. Queue). cognee-Imports sind überall **lazy** (erst nach
 `load_instance_env`, weil cognee Env beim Import liest). `cognee_io` ist gegen
-0.3.9 verifiziert; `_render` behandelt sowohl `SearchResult`-Objekte als auch
+1.2.2 verifiziert; `_render` behandelt sowohl `SearchResult`-Objekte als auch
 dicts (ACL-Modus).
 
 **Ein Event-Loop pro Instanz — niemals einer pro Job.** cognee cachet
@@ -68,11 +68,10 @@ loop-gebundene Ressourcen; ein frischer Loop pro Frage/Job löst
   Loop wie die FastAPI-Handler (kein Thread, kein neuer Loop).
 - `cli.eval` beantwortet alle Fragen sequenziell im selben Loop (`_answer_all`).
 
-**Kuzu ist strikt single-writer.** Genau ein Worker pro Instanz. Deshalb gibt es
-**keinen** offiziellen `cognee-mcp` (der würde eine zweite Kuzu-RW-Instanz öffnen
-→ Lock-Crash); stattdessen der eigene dünne `mcp_server.py`, der wie das Gateway
-nur proxyt/enqueued. `recover_stale()` setzt verwaiste `running`-Jobs gefahrlos
-zurück, weil es nur einen Schreiber gibt.
+**Cognee/Ladybug bleibt in `kb` single-writer.** Genau ein Worker pro Instanz.
+Deshalb gibt es **keinen** offiziellen `cognee-mcp`; stattdessen proxyt/enqueued
+der eigene dünne `mcp_server.py` wie das Gateway. `recover_stale()` setzt
+verwaiste `running`-Jobs gefahrlos zurück, weil es nur einen Schreiber gibt.
 
 **SQLite-Connections sind thread-/loop-gebunden.** Gateway und MCP-Server bauen
 pro Request eine frische `JobQueue`/`SourceStore`. Queue läuft im WAL-Modus;
@@ -120,7 +119,7 @@ YAML-Frontmatter (`sources.py` quotet Strings mit Doppelpunkt bewusst — nicht 
 ## Konventionen
 
 - Kommentare und Doc-Strings auf Deutsch, knapp, erklären das **Warum** (oft
-  cognee-/Kuzu-/asyncio-Fallstricke). Dieser Stil ist beim Anfassen beizubehalten.
-- Dependencies sind teils hart gepinnt mit Begründung im Kommentar (`fastembed==0.6.0`
-  Pooling-Wechsel; `mistralai<2` cognee-Konflikt) — nicht ohne Grund anheben.
+  cognee-/Ladybug-/asyncio-Fallstricke). Dieser Stil ist beim Anfassen beizubehalten.
+- Dependencies sind teils hart gepinnt mit Begründung im Kommentar
+  (`cognee==1.2.2`; `fastembed==0.6.0` wegen Pooling-Wechsel) — nicht ohne Grund anheben.
 - Git: Commit-Messages auf Englisch, im Stil der bestehenden Historie.

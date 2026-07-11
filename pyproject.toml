@@ -5,7 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "cognee==0.3.*",
+    "cognee==1.2.2",
+    # Cognee 1.2.2 importiert im ACL-Pfad cryptography.fernet, deklariert die
+    # Laufzeitabhängigkeit aber nicht selbst.
+    "cryptography>=46.0.5",
     # Hart gepinnt: fastembed 0.6 wechselte das Pooling (CLS -> mean) für mpnet.
     # Ein Versionswechsel ändert die Vektoren -> bestehender Index wäre wertlos.
     "fastapi>=0.136.3",
@@ -33,15 +36,8 @@ dev = [
 ]
 
 [tool.uv]
-# cognee 0.3.9 erlaubt mistralai>=1.9.10 ohne Obergrenze, aber sein
-# instructor-Pin (1.15.x) braucht mistralai<2 — sonst bricht `import cognee`.
-constraint-dependencies = ["mistralai<2.0.0"]
 # Transitive Deps, die upstream (cognee/fastapi) zu niedrig pinnen, aber CVE-Fixes
 # enthalten — hier nach oben erzwingen (kb nutzt sie nicht direkt, s. Audit-Job).
-# ACHTUNG: fastapi-users NICHT anheben — cognee 0.3.9 braucht v14 (dort liegt
-# SQLAlchemyUserDatabase in fastapi_users.db); v15 bricht `import cognee`.
-# CVE-2025-68481 (fastapi-users) ist für kb nicht erreichbar (keine User-Auth,
-# nur Bearer-Token) und wird im Audit-Job per --ignore-vuln geduldet.
 override-dependencies = ["python-multipart>=0.0.31", "pyjwt>=2.13", "pillow>=12.2"]
 
 [build-system]

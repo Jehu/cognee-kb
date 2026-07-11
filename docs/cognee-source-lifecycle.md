@@ -1,27 +1,45 @@
-# Cognee source lifecycle (0.3.x)
+# Cognee source lifecycle (1.2.2)
 
-Stand: 2026-07-11, geprüft gegen die installierte Cognee-Version 0.3.x.
+Stand: 2026-07-11, geprüft gegen Cognee 1.2.2.
 
 ## Ergebnis
 
-Das Gate für atomare Quellenrevisionen ist **nicht bestanden**. `kb` implementiert deshalb vorerst keine automatische Aktivierung geänderter Revisionen.
-
-Cognee stellt zwar `add`, `delete` und `update` bereit, aber `update` führt intern nacheinander `delete`, `add` und `cognify` aus. Scheitert `add` oder `cognify` nach dem Löschen, ist die bisher aktive Quelle bereits aus Graph, Vektor- und relationaler Datenbank entfernt. Eine Transaktion oder ein Rollback über diese drei Speicher ist nicht vorhanden.
+Das Gate für quellbezogenes Löschen und erneutes Indexieren ist bestanden.
+`kb` aktiviert Quellenrevisionen und Collection-Reindexierung trotzdem erst,
+wenn Queue-Wiederanlauf, persistierte Cognee-IDs und ein sichtbarer
+Synchronisationsstatus gemeinsam implementiert sind. Löschen, `add` und
+`cognify` bilden weiterhin keine speicherübergreifende Transaktion.
 
 ## Verifizierte API-Eigenschaften
 
-- `cognee.add(...)` liefert `PipelineRunInfo` mit `dataset_id` und `data_ingestion_info`; die Einträge in `data_ingestion_info` enthalten `data_id`.
-- `cognee.delete(data_id, dataset_id, mode)` entfernt Dokument-Subgraph, Vektoren und relationale Zuordnungen.
-- `cognee.update(data_id, data, dataset_id, ...)` ruft zuerst `delete`, danach `add` und zuletzt `cognify` auf.
-- `kb/cognee_io.py` verwirft die Rückgabe von `cognee.add` derzeit. `SourceRecord` kennt daher weder `data_id` noch `dataset_id`.
+- `cognee.add(..., node_set=...)` akzeptiert weiterhin mehrere NodeSets.
+- `cognee.search(..., query_type=CHUNKS, node_name=[...],
+  node_name_filter_operator="OR")` filtert native Chunk-Treffer nach NodeSet.
+- `cognee.datasets.delete_data(dataset_id, data_id)` entfernt eine einzelne
+  Quelle über Cognees Ownership-Ledger.
+- Ein realer Wegwerf-Test mit zwei Quellen und einem gemeinsamen Begriff hat
+  gezeigt: Nach dem Löschen von Quelle A bleiben Quelle B und der gemeinsame
+  Begriff durchsuchbar.
+- Erneutes Hinzufügen und Cognifizieren von Quelle A stellt deren Treffer wieder
+  her; ein wiederholter identischer Lauf erzeugte keine zusätzlichen Data-Records.
+- `kb/cognee_io.py` verwirft die Rückgabe von `cognee.add` derzeit noch.
+  `SourceRecord` kennt daher noch keine `data_id` oder `dataset_id`.
 
-## Konsequenz für Plan 029
+Der reale Test liegt als bewusst deaktivierter Cloud-Gate unter
+`tests/test_cognee_cloud_gate.py`. Er verwendet ausschließlich synthetische
+Inhalte und läuft nur mit `KB_RUN_COGNEE_CLOUD_GATE=1`.
 
-U8 bleibt gemäß Stop-Bedingung ausgesetzt. Eine sichere Umsetzung benötigt mindestens:
+## Konsequenz für Quellenrevisionen und Collections
+
+Eine sichere produktive Umsetzung benötigt weiterhin:
 
 1. Persistenz von Cognee-`data_id` und `dataset_id` beim ersten Ingest.
-2. Einen getesteten Rollback, der bei fehlgeschlagenem Update die vorherige Rohdatei erneut einspielt und cognifiziert.
-3. Einen Integrationstest mit temporären Cognee-Verzeichnissen, der nach erfolgreichem Update das Verschwinden eines nur in der alten Revision vorkommenden Texts und das Auftauchen eines nur in der neuen Revision vorkommenden Texts belegt.
-4. Einen Fehlerfalltest, der nach einem simulierten `add`- oder `cognify`-Fehler die alte Revision wieder als suchbar nachweist.
+2. Einen idempotenten Queue-Job für Löschen, erneutes `add` und `cognify`.
+3. Getrennte gewünschte und erfolgreich indexierte Zustände, damit fehlgeschlagene
+   Reindexierungen keine breitere Suche verursachen.
+4. Wiederanlauf und Retry nach einem Fehler zwischen den drei Cognee-Schritten.
+5. Einen sichtbaren Status für ausstehende oder fehlgeschlagene Synchronisierung.
 
-Bis diese vier Bedingungen erfüllt sind, bleibt die bestehende content-hash-basierte Idempotenz unverändert. Eine bloße Raw-Datei-Historie ohne korrekte abgeleitete Zustände würde Nutzern eine Versionssicherheit vortäuschen, die die Suche nicht einhält.
+Bis diese Bedingungen umgesetzt sind, bleibt die bestehende content-hash-basierte
+Idempotenz unverändert. Die Markdown-Rohschicht bleibt der vollständige
+Wiederaufbau- und Rollback-Pfad.

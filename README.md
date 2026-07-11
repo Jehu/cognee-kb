@@ -85,7 +85,7 @@ Unterstützt werden `.md` und `.txt`. Wichtige Optionen:
 --node-set projekt-a
 ```
 
-Der Import geht ebenfalls durch die Queue und respektiert damit die Single-Writer-Grenze von Cognee/Kuzu.
+Der Import geht ebenfalls durch die Queue und respektiert damit die Single-Writer-Grenze von Cognee/Ladybug.
 
 ### Mobil erfassen
 
@@ -234,9 +234,9 @@ Eine Abfrage läuft so ab:
 4. Unbekannte oder Cross-Vault-Quellen-IDs werden verworfen.
 5. Die Antwort enthält additive Felder für `evidence`, `citations`, `gaps` und `trace`.
 
-Das Gateway auf Port `8800` ist mit einem Bearer-Token geschützt und importiert Cognee nicht. Es proxyt Abfragen an die nur auf `127.0.0.1` erreichbaren Instance Services. Pro Wall gibt es genau einen Worker; alle Cognee-Zugriffe innerhalb des Prozesses werden zusätzlich serialisiert, da Kuzu eine geteilte Connection nicht parallel verwenden darf.
+Das Gateway auf Port `8800` ist mit einem Bearer-Token geschützt und importiert Cognee nicht. Es proxyt Abfragen an die nur auf `127.0.0.1` erreichbaren Instance Services. `kb` verwendet Cognee 1.2.2 mit dessen Ladybug-basiertem Graph-Stack. Pro Wall gibt es genau einen Worker; alle Cognee-Zugriffe innerhalb des Prozesses werden zusätzlich serialisiert, damit Ingest und Suche dieselbe Instanz nicht gleichzeitig verändern oder lesen.
 
-Die versionierbare Markdown-Rohschicht unter `raw/<vault>/` bleibt der Exit-Pfad aus Cognee. Quellenrevisionen sind noch nicht aktiviert: Cognee 0.3.x löscht beim Update die alte Quelle vor `add` und `cognify` und bietet dafür kein atomares Rollback. Details stehen in [docs/cognee-source-lifecycle.md](docs/cognee-source-lifecycle.md).
+Die versionierbare Markdown-Rohschicht unter `raw/<vault>/` bleibt der Exit-Pfad aus Cognee. Quellenrevisionen sind noch nicht aktiviert. Cognee 1.2.2 kann einzelne Quellen löschen und neu indexieren; `kb` nutzt diesen nicht-atomaren Ablauf erst, sobald Queue, Wiederanlauf und sichtbarer Synchronisationsstatus gemeinsam umgesetzt sind. Details stehen in [docs/cognee-source-lifecycle.md](docs/cognee-source-lifecycle.md).
 
 ## Docker und VPS
 
