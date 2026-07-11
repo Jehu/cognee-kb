@@ -1,185 +1,276 @@
-# kb — Multi-Vault Knowledge System
+# kb — persönliche Knowledge Base mit getrennten Datenschutzbereichen
 
-Persönliches Knowledge System auf Basis von Cognee. Zwei Instanzen ("Walls"):
-`local` (lokal via Ollama, Inhalte verlassen den Rechner nie) und `cloud`
-(Cloud-LLM via OpenRouter/DeepSeek). Vier Vaults — `privat` (Wall `local`),
-`allgemein`, `business-ki` und `business-mwe` (Wall `cloud`) — plus serielle
-Ingest-Queue (SQLite). Topologie ist in `kb.toml` definiert (Single Source of Truth).
-Details: `docs/` (PRD, Architektur, Phasenpläne).
+`kb` sammelt Webseiten, PDFs, YouTube-Transkripte, Dateien und Notizen in thematischen Vaults. Inhalte lassen sich über eine PWA, die CLI oder MCP-Agenten erfassen und abfragen.
 
-## Setup
+Das zentrale Datenschutzprinzip sind getrennte **Walls**:
+
+- `local` verarbeitet private Inhalte ausschließlich lokal mit Ollama.
+- `cloud` verwendet ein Cloud-LLM, derzeit über OpenRouter/DeepSeek.
+
+Die aktuelle Konfiguration enthält den lokalen Vault `privat` sowie die Cloud-Vaults `allgemein`, `business-ki` und `business-mwe`. Walls, Vaults und Ports werden zentral in `kb.toml` definiert.
+
+## Schnellstart
+
+### 1. Abhängigkeiten und Zugangsdaten einrichten
 
 ```sh
 uv sync
-cp .env.local.template .env.local      # anpassen (Ollama)
-cp .env.cloud.template .env.cloud      # API-Key eintragen (Cloud-LLM)
+cp .env.local.template .env.local       # Ollama konfigurieren
+cp .env.cloud.template .env.cloud       # Cloud-API-Key eintragen
+cp .env.gateway.template .env.gateway   # KB_API_TOKEN setzen
 ```
 
-## Tests
+Für die Weboberfläche:
 
 ```sh
-uv run pytest              # Python-Backend
-cd web && npm test         # PWA (node --test)
-make test                  # beides zusammen
+cd web
+npm install
+npm run build
+cd ..
 ```
 
-## CLI
+### 2. Dienste starten
 
 ```sh
-uv run kb ingest <vault> <url-oder-text-oder-datei>   # in Queue legen
-uv run kb import <vault> <dir-oder-datei>             # .md/.txt-Bestand migrieren (--exclude, --only-newer-than, --limit, --dry-run)
-uv run kb worker <instance>                           # Queue abarbeiten (local | cloud)
-uv run kb query <vault> "Frage"                       # evidenzgebundene Antwort
-uv run kb search <vault> "Frage"                      # gerankte Chunks, keine Synthese
-uv run kb diagnose-query <vault> "Frage"              # Retrieval-Diagnose (Inhalte redigiert)
-uv run kb maintain <instance>                         # read-only Bestands-Audit
+uv run kb up
 ```
 
-`diagnose-query --show-content` zeigt zusätzlich die gefundenen Chunk-Inhalte.
-`maintain` schreibt ohne `--apply` nichts. Erlaubte Reparaturen sind ausschließlich
-`--apply stale-jobs` und `--apply orphan-temp`; Re-Index, Quellenlöschung und
-Metadatenumschreibung bleiben gesperrt. Mit `KB_STALE_DAYS` kann die Schwelle für
-den Hinweis auf veraltete Evidenz geändert werden (Default: 180 Tage).
+Dieser Befehl startet Gateway, lokale Wall und Cloud-Wall im Hintergrund. Die Prozesse überleben das Terminal.
 
-## Phase 2 — Gateway + PWA
-
-Architektur: Gateway (Port 8800, Bearer-Token, ohne cognee) nimmt Ingest
-entgegen und proxyt Queries an die Instance Services local :8801 /
-cloud :8802 (nur 127.0.0.1).
-
-Token-Setup (einmalig):
+Status prüfen:
 
 ```sh
-cp .env.gateway.template .env.gateway   # KB_API_TOKEN setzen (.env.gateway ist gitignored)
+uv run kb status
 ```
 
-PWA bauen (liefert das Gateway aus `web/dist/` aus):
+Die PWA wird vom Gateway auf Port `8800` ausgeliefert. Beim ersten Aufruf den `KB_API_TOKEN` aus `.env.gateway` in den Einstellungen hinterlegen.
+
+## Wissen erfassen
+
+### Über die PWA
+
+Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Optional können Metadaten und ein Node-Set angegeben werden. Der Fortschritt des Queue-Jobs wird direkt angezeigt.
+
+Ohne gültigen Gateway-Token bleiben Vault-Auswahl, Capture und Chat gesperrt.
+
+### Über die CLI
 
 ```sh
-cd web && npm install && npm run build
+uv run kb ingest <vault> <url-oder-text-oder-datei>
 ```
 
-In der PWA wird der Bearer-Token lokal in den Einstellungen hinterlegt. Ohne
-gültigen Token lädt die App keine Vault-Liste aus dem Gateway und sperrt
-Vault-Auswahl sowie Ingest-/Chat-Aktionen; die Einstellungen zeigen zusätzlich
-Gateway-, Instanz- und Authentifizierungsstatus. Vault-Auswahlen zeigen die
-zugehörige Wall (`local`/`cloud`) gruppiert und im Optionstext an.
-Der Ingest-Screen ist als schneller Capture-Flow aufgebaut (Metadaten einklappbar,
-Node-Set-Autosuggest aus bestehenden Jobs, Job-Fortschritt sichtbar); der Chat
-zeigt im leeren Zustand Beispiel-Fragen. Antworten werden aus den zuvor
-gefundenen Chunks synthetisiert, tragen validierte Evidenz-Referenzen und zeigen
-deterministisch erkannte Wissenslücken (z. B. keine, nicht auflösbare oder
-veraltete Evidenz). Die Einstellungen bieten Token-Anzeige sowie einen
-Verbindungstest.
-
-Starten (ein Befehl, idempotent):
+Beispiele:
 
 ```sh
-uv run kb up                    # alle Dienste detached (local + cloud + gateway)
-uv run kb up local              # nur eine Wall oder 'gateway'
-uv run kb status                # Lauf-Status aller Dienste (Port + PID)
-uv run kb logs gateway          # Live-Logs (tail -f), Strg-C bricht ab
-uv run kb down                  # alle stoppen
+uv run kb ingest privat "Eine private Notiz"
+uv run kb ingest allgemein https://example.com/artikel
+uv run kb ingest business-ki ./bericht.pdf
 ```
 
-Dienste laufen detached (überleben das Terminal). Logs landen in
-`var/gateway.log` bzw. `var/<wall>/logs/serve.log`. Nach `kb.toml`-Änderungen
-greifen diese erst nach Neustart der betroffenen Prozesse: `kb restart all`.
+Der Inhalt wird zunächst in die serielle Queue gelegt. Der Worker lädt beziehungsweise extrahiert die Quelle, schreibt eine kanonische Markdown-Kopie nach `raw/<vault>/` und übergibt sie anschließend an Cognee.
 
-Zugriff von unterwegs über Tailscale (kein offener Port nötig);
-iOS-Teilen-Sheet → Knowledge Base: siehe `ops/ios-kurzbefehl.md`.
-
-## Topologie ändern (kb.toml)
-
-`kb.toml` ist die Single Source of Truth (Walls, Vaults, Ports). `config.py` lädt
-sie **beim Import** und friert sie als Schnappschuss ein — Änderungen greifen
-deshalb erst nach Neustart der betroffenen Prozesse:
-
-- **CLI** (`kb ingest/query/...`) liest `kb.toml` bei jedem Aufruf frisch → kein Neustart nötig.
-- **Server** (Gateway, Instance Services, MCP) halten den Schnappschuss → Neustart nötig.
-
-Helfer dafür (beendet den Prozess auf dem Port des Ziels sauber und startet ihn
-detached neu — der Port ist der eindeutige Anker, kein Namens-Matching):
+### Bestehende Markdown-Sammlungen importieren
 
 ```sh
-uv run kb restart local        # Instance Service einer Wall (local | cloud)
-uv run kb restart gateway      # das Gateway
-uv run kb restart all          # alle Instances + Gateway
+uv run kb import <vault> <datei-oder-verzeichnis>
 ```
 
-Nach Änderungsart:
-
-- **Vault zu bestehender Wall:** `kb restart <wall>` **und** `kb restart gateway`.
-  `raw/<name>/` und das cognee-Dataset entstehen automatisch beim ersten Ingest;
-  die PWA-Auswahl füllt sich aus `/api/vaults` (kein `npm run build` nötig).
-- **Neue Wall:** zuerst `.env.<name>` anlegen (sonst scheitert der Start am Guard),
-  dann `kb restart all`.
-- **Port geändert:** betroffene Instance **und** Gateway neu starten.
-
-Fallstricke: `kb.toml` ist validiert — bei kaputtem TOML, doppelten/Gateway-
-kollidierenden Ports oder unbekannter Wall startet der Server gar nicht (lauter
-`ConfigError`, kein stiller Halbzustand). Und **Umbenennen ≠ Daten mitnehmen**:
-Dataset-Name und Pfade werden aus dem Namen abgeleitet, ein umbenannter Vault
-startet leer (die alten cognee-Daten bleiben unter dem alten Namen liegen).
-
-## Phase 3 — MCP (Agent-Zugriff)
-
-Pro Instanz ein eigener dünner stdio-MCP-Server (`kb/mcp_server.py`) statt des
-offiziellen `cognee-mcp`: Letzterer öffnet eine eigene Kuzu-RW-Instanz, und Kuzu
-ist strikt single-writer — neben dem laufenden Instance Service führt das zum
-Lock-Crash oder zu divergierenden Daten. Der eigene Server bleibt cognee-frei,
-proxyt Queries per httpx an den Instance Service und schreibt Ingest direkt in
-die Queue. Die bestehenden `search_<vault>`-Tools liefern weiterhin Antworten;
-`retrieve_<vault>` liefert gerankte Evidenz ohne Synthese. Instanzen mit mehreren
-Vaults erhalten zusätzlich `search_all` und `retrieve_all`; jede Instanz bietet
-außerdem `ingest` und `job_status`.
+Unterstützt werden `.md` und `.txt`. Wichtige Optionen:
 
 ```sh
-uv run kb serve-mcp local     # bzw. cloud — Instance Service muss laufen
+--dry-run
+--exclude "drafts/*"
+--only-newer-than 2026-01-01
+--limit 100
+--node-set projekt-a
 ```
 
-Registrierung in Claude Code (project-scope, Isolations-Regeln, Verifikation):
-siehe `ops/mcp-setup.md`. Kopiervorlagen: `ops/mcp/local.mcp.json` und
-`ops/mcp/cloud.mcp.json`.
+Der Import geht ebenfalls durch die Queue und respektiert damit die Single-Writer-Grenze von Cognee/Kuzu.
 
-## Query-Datenfluss und Quellenqualität
+### Mobil erfassen
 
-`kb query` und `POST /api/query` verwenden einen Evidence-first-Datenfluss:
+Der Zugriff von unterwegs ist über Tailscale möglich, ohne Port `8800` öffentlich freizugeben. Für das iOS-Teilen-Sheet siehe [ops/ios-kurzbefehl.md](ops/ios-kurzbefehl.md).
 
-1. Cognee `CHUNKS` liefert gerankte Evidenz innerhalb der gewählten Wall.
-2. Die Chunks erhalten lokale Evidenz-IDs (`e1`, `e2`, ...).
-3. Das für die Wall erlaubte LLM synthetisiert ausschließlich aus diesen Chunks
-   und ordnet Aussagen Evidenz-IDs zu.
-4. `kb` verwirft unbekannte IDs, löst Quellen nur im angefragten Vault auf und
-   ergänzt maschinenlesbare `citations` und `gaps`.
+## Wissen abfragen
 
-`POST /api/search` und `kb search` stoppen nach Schritt 1 und verursachen keine
-Antwort-Synthese. Die bisherigen Response-Felder `answer` und `sources` bleiben
-erhalten; `evidence`, `citations`, `gaps` und `trace` sind additive Felder.
+### Chat in der PWA
 
-Quellenrevisionen sind noch nicht aktiviert: Cognee 0.3.x löscht beim Update die
-alte Quelle vor `add` und `cognify` und bietet über diesen Ablauf kein atomisches
-Rollback. Der verifizierte Stand und die Bedingungen für eine spätere Umsetzung
-stehen in `docs/cognee-source-lifecycle.md`.
+Der Chat erzeugt Antworten ausschließlich aus zuvor gefundenen Evidenz-Chunks. Die Oberfläche zeigt:
 
-## Phase 4 — Docker (Deployment)
+- validierte Belege pro Aussage,
+- die zugehörigen Quellen,
+- erkennbare Wissenslücken wie fehlende, nicht auflösbare oder veraltete Evidenz.
 
-Ein-Container-Setup: `kb serve` startet alle Instance Services + Gateway als
-eigene Subprozesse im Vordergrund (PID 1 = `dumb-init`, leitet SIGTERM weiter).
-`kb.toml`, `.env.*` und die Daten-Volumes werden gemountet — ein
-Topologie- oder Token-Wechsel braucht nur `docker compose restart`, kein Rebuild.
+### Antwort über die CLI
 
 ```sh
-# .env.* aus Templates anlegen (wie lokal), dann:
-docker compose up -d --build     # Build + Start
-docker compose logs -f           # Live-Logs aller Dienste
-docker compose restart           # kb.toml-Änderung greift nach Restart
-docker compose down              # Stop (Daten-Volumes bleiben erhalten)
+uv run kb query <vault> "Frage"
 ```
 
-Port 8800 (Gateway) wird gepublished, die Instance Services bleiben intern.
-Der Healthcheck (`/api/health`) wird von Docker automatisch überwacht.
+### Nur Evidenz abrufen
 
-Hinweis `local`-Wall: Ollama läuft nicht im Container. Auf dem VPS nur die
-`cloud`-Walls in `kb.toml` definieren (oder Ollama als eigenen Service starten
-und `LLM_ENDPOINT` in `.env.local` auf dessen Adresse setzen).
+```sh
+uv run kb search <vault> "Frage"
+```
+
+`search` liefert gerankte Chunks ohne Antwort-Synthese und damit ohne zusätzlichen Synthese-LLM-Aufruf.
+
+### Retrieval diagnostizieren
+
+```sh
+uv run kb diagnose-query <vault> "Frage"
+```
+
+Die Diagnose zeigt Ränge, Quellenauflösung, Gap-Signale und Laufzeiten. Chunk-Inhalte sind standardmäßig ausgeblendet. Für eine lokale Detailanalyse:
+
+```sh
+uv run kb diagnose-query <vault> "Frage" --show-content
+```
+
+Die Schwelle für den Hinweis auf veraltete Evidenz wird über `KB_STALE_DAYS` gesetzt; Standard sind 180 Tage.
+
+## Agenten über MCP verbinden
+
+Jede Wall besitzt einen eigenen stdio-MCP-Server. Dadurch kann ein Agent nur die Vaults der registrierten Wall erreichen.
+
+```sh
+uv run kb serve-mcp local
+uv run kb serve-mcp cloud
+```
+
+Der jeweilige Instance Service muss bereits laufen. Die verfügbaren Werkzeuge werden aus `kb.toml` erzeugt:
+
+- `search_<vault>` erzeugt eine evidenzgebundene Antwort.
+- `retrieve_<vault>` liefert gerankte Evidenz ohne Synthese.
+- `search_all` und `retrieve_all` existieren bei Walls mit mehreren Vaults.
+- `ingest` legt Inhalte in die Queue.
+- `job_status` prüft einen Queue-Job.
+
+MCP-Server immer im **Project Scope** registrieren:
+
+- local-MCP nur in privaten Projekten,
+- cloud-MCP nur in Business-Projekten,
+- niemals einen kb-MCP global im User Scope registrieren.
+
+Anleitung und Vorlagen: [ops/mcp-setup.md](ops/mcp-setup.md), [ops/mcp/local.mcp.json](ops/mcp/local.mcp.json) und [ops/mcp/cloud.mcp.json](ops/mcp/cloud.mcp.json).
+
+## Betrieb und Wartung
+
+### Dienste steuern
+
+```sh
+uv run kb up                    # alles starten
+uv run kb up local              # nur eine Wall starten
+uv run kb up gateway            # nur das Gateway starten
+uv run kb status                # Ports und PIDs anzeigen
+uv run kb logs gateway          # Log live verfolgen
+uv run kb restart local         # eine Wall neu starten
+uv run kb restart gateway       # Gateway neu starten
+uv run kb restart all           # alles neu starten
+uv run kb down                  # alles stoppen
+```
+
+Logs liegen unter `var/gateway.log` beziehungsweise `var/<wall>/logs/serve.log`.
+
+### Bestandsprüfung
+
+```sh
+uv run kb maintain <instance>
+```
+
+Ohne `--apply` ist der Befehl strikt read-only. Er meldet unter anderem fehlende oder unzulässige Raw-Pfade, doppelte Inhalte, fehlgeschlagene Jobs und verwaiste temporäre Dateien.
+
+Nur zwei Reparaturen sind derzeit freigegeben:
+
+```sh
+uv run kb maintain local --apply stale-jobs
+uv run kb maintain local --apply orphan-temp
+```
+
+Re-Index, Quellenlöschung und Metadatenumschreibung bleiben absichtlich gesperrt.
+
+## Walls und Vaults konfigurieren
+
+`kb.toml` ist die Single Source of Truth für Walls, Vaults und Ports:
+
+```toml
+[walls.local]
+mode = "local"
+port = 8801
+
+[[vaults]]
+name = "privat"
+wall = "local"
+```
+
+Aus den Namen werden weitere Werte abgeleitet:
+
+- Wall `<name>` verwendet `.env.<name>` und `var/<name>/`.
+- Vault `<name>` verwendet das Cognee-Dataset `<name>` und `raw/<name>/`.
+
+Nach Änderungen gelten folgende Neustartregeln:
+
+- Neuer Vault in bestehender Wall: `kb restart <wall>` und `kb restart gateway`.
+- Neue Wall: zuerst `.env.<name>` anlegen, danach `kb restart all`.
+- Geänderter Port: betroffene Wall und Gateway neu starten.
+
+CLI-Aufrufe lesen `kb.toml` bei jedem Start neu. Laufende Server halten dagegen einen Konfigurations-Schnappschuss.
+
+`kb.toml` wird beim Start validiert. Ungültiges TOML, doppelte Ports oder Vaults mit unbekannter Wall führen zu einem klaren `ConfigError`. Das Umbenennen eines Vaults migriert keine Daten: Dataset und Pfade werden aus dem Namen abgeleitet, daher startet der neue Name leer.
+
+## Datenschutz und Datenfluss
+
+Vor jedem Cognee- oder Synthese-Aufruf prüft ein Guard, ob der konfigurierte LLM-Provider zur Wall passt:
+
+- `local` erlaubt nur `ollama`.
+- `cloud` erlaubt nur den konfigurierten Cloud-Provider.
+- Embeddings bleiben fest auf `fastembed`, weil ein Wechsel bestehende Vektoren ungültig machen würde.
+
+Eine Abfrage läuft so ab:
+
+1. Cognee `CHUNKS` liefert Evidenz innerhalb der gewählten Wall.
+2. `kb` vergibt lokale Evidenz-IDs wie `e1` und `e2`.
+3. Das für die Wall erlaubte LLM synthetisiert ausschließlich aus diesen Chunks.
+4. Unbekannte oder Cross-Vault-Quellen-IDs werden verworfen.
+5. Die Antwort enthält additive Felder für `evidence`, `citations`, `gaps` und `trace`.
+
+Das Gateway auf Port `8800` ist mit einem Bearer-Token geschützt und importiert Cognee nicht. Es proxyt Abfragen an die nur auf `127.0.0.1` erreichbaren Instance Services. Pro Wall gibt es genau einen Worker; alle Cognee-Zugriffe innerhalb des Prozesses werden zusätzlich serialisiert, da Kuzu eine geteilte Connection nicht parallel verwenden darf.
+
+Die versionierbare Markdown-Rohschicht unter `raw/<vault>/` bleibt der Exit-Pfad aus Cognee. Quellenrevisionen sind noch nicht aktiviert: Cognee 0.3.x löscht beim Update die alte Quelle vor `add` und `cognify` und bietet dafür kein atomares Rollback. Details stehen in [docs/cognee-source-lifecycle.md](docs/cognee-source-lifecycle.md).
+
+## Docker und VPS
+
+Das Ein-Container-Setup startet Gateway und alle konfigurierten Instance Services als getrennte Subprozesse:
+
+```sh
+docker compose up -d --build
+docker compose logs -f
+docker compose restart
+docker compose down
+```
+
+`kb.toml`, `.env.*` und die Datenverzeichnisse werden gemountet. Änderungen an Topologie oder Token benötigen daher nur einen Neustart, keinen Rebuild. Nur Port `8800` wird veröffentlicht; Instance Services bleiben intern. Docker überwacht `/api/health`.
+
+Ollama läuft nicht im Container. Auf einem reinen Cloud-VPS entweder nur Cloud-Walls in `kb.toml` definieren oder Ollama als separaten Dienst betreiben und `LLM_ENDPOINT` entsprechend setzen.
+
+## Entwicklung
+
+Alle Prüfungen:
+
+```sh
+make test
+uv run ruff check kb tests
+uv run ruff format --check kb tests
+uv run mypy kb
+cd web && npm run build
+```
+
+Einzelne Testbereiche:
+
+```sh
+uv run pytest
+uv run pytest tests/test_worker.py
+cd web && npm test
+```
+
+Weiterführende Produkt-, Architektur- und Betriebsdokumente liegen unter `docs/` und `ops/`.
