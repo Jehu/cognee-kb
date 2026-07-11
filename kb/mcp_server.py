@@ -2,7 +2,8 @@
 
 Wie das Gateway läuft dieser Prozess OHNE cognee-Import (Privacy-Wand): Queries
 gehen per Query-Proxy an den Instance Service, Ingest direkt in die SQLite-Queue.
-Erlaubte kb-Imports daher nur: config, classify, queue, query_proxy.
+Erlaubte kb-Imports bleiben cognee-frei: config, classify, queue, query_proxy
+und der kurzlebige SourceStore für Sammlungs-Discovery und -Validierung.
 
 Startwege (primär: CLI):
   * `kb serve-mcp <instance>`                  ← primär
@@ -15,9 +16,10 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from kb.classify import build_payload
-from kb.config import VAULTS, get_instance, queue_path
+from kb.config import VAULTS, get_instance, queue_path, sources_path
 from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
 from kb.queue import JobQueue
+from kb.sources import CollectionValidationError, SourceStore
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -41,9 +43,28 @@ def build_server(instance_name: str) -> "FastMCP":
     vault_names = {v.name for v in vaults}
     mcp = FastMCP(f"kb-{instance_name}")
 
-    async def _query(question: str, datasets: list[str]) -> str:
+    def _validate_collections(vault: str, collection_ids: list[str] | None) -> str | None:
+        if collection_ids is None:
+            return None
+        store = SourceStore(sources_path(instance_name))
         try:
-            data = await proxy_query(instance_name, question, datasets)
+            store.validate_collection_ids(vault, collection_ids)
+        except CollectionValidationError as exc:
+            return str(exc)
+        finally:
+            store.close()
+        return None
+
+    async def _query(
+        question: str, datasets: list[str], collection_ids: list[str] | None = None
+    ) -> str:
+        try:
+            if collection_ids is None:
+                data = await proxy_query(instance_name, question, datasets)
+            else:
+                data = await proxy_query(
+                    instance_name, question, datasets, collection_ids=collection_ids
+                )
         except QueryProxyError as e:
             return str(e)
         return str(data["answer"])
@@ -51,22 +72,33 @@ def build_server(instance_name: str) -> "FastMCP":
     # --- pro Vault ein search-Tool (Closure über vault sauber gebunden) ---
     for v in vaults:
 
-        def make_search(dataset: str) -> Callable[[str], Awaitable[str]]:
-            async def search(question: str) -> str:
-                return await _query(question, [dataset])
+        def make_search(vault_name: str, dataset: str) -> Callable[..., Awaitable[str]]:
+            async def search(question: str, collection_ids: list[str] | None = None) -> str:
+                error = _validate_collections(vault_name, collection_ids)
+                if error:
+                    return error
+                return await _query(question, [dataset], collection_ids)
 
             return search
 
         mcp.add_tool(
-            make_search(v.dataset),
+            make_search(v.name, v.dataset),
             name=_tool_name(v.name),
             description=f"Frage an den Vault '{v.name}' (GRAPH_COMPLETION).",
         )
 
-        def make_retrieve(dataset: str) -> Callable[[str], Awaitable[str]]:
-            async def retrieve(question: str) -> str:
+        def make_retrieve(vault_name: str, dataset: str) -> Callable[..., Awaitable[str]]:
+            async def retrieve(question: str, collection_ids: list[str] | None = None) -> str:
+                error = _validate_collections(vault_name, collection_ids)
+                if error:
+                    return error
                 try:
-                    data = await proxy_search(instance_name, question, [dataset])
+                    if collection_ids is None:
+                        data = await proxy_search(instance_name, question, [dataset])
+                    else:
+                        data = await proxy_search(
+                            instance_name, question, [dataset], collection_ids=collection_ids
+                        )
                 except QueryProxyError as e:
                     return str(e)
                 return json.dumps(data, ensure_ascii=False, indent=2)
@@ -74,7 +106,7 @@ def build_server(instance_name: str) -> "FastMCP":
             return retrieve
 
         mcp.add_tool(
-            make_retrieve(v.dataset),
+            make_retrieve(v.name, v.dataset),
             name=_retrieval_tool_name(v.name),
             description=f"Ruft gerankte Evidenz aus dem Vault '{v.name}' ab (ohne Synthese).",
         )
@@ -108,20 +140,56 @@ def build_server(instance_name: str) -> "FastMCP":
             description="Ruft gerankte Evidenz aus allen Vaults dieser Instanz ab (ohne Synthese).",
         )
 
+    async def list_collections(vault: str) -> str:
+        """Listet aktive Sammlungen mit stabilen IDs und Anzeigenamen."""
+        if vault not in vault_names:
+            return (
+                f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
+                f"Erlaubt: {', '.join(sorted(vault_names))}"
+            )
+        store = SourceStore(sources_path(instance_name))
+        try:
+            records = store.list_collections(vault)
+        finally:
+            store.close()
+        return json.dumps(
+            {
+                "vault": vault,
+                "collections": [{"id": record.id, "label": record.label} for record in records],
+            },
+            ensure_ascii=False,
+        )
+
+    mcp.add_tool(
+        list_collections,
+        name="list_collections",
+        description=f"Listet aktive Sammlungen der Instanz '{inst.name}' (read-only).",
+    )
+
     # --- ingest ---
-    async def ingest(vault: str, content: str, node_set: str | None = None) -> str:
+    async def ingest(
+        vault: str,
+        content: str,
+        node_set: str | None = None,
+        collection_ids: list[str] | None = None,
+    ) -> str:
         """Wirft Input in die Queue eines Vaults dieser Instanz."""
         if vault not in vault_names:
             return (
                 f"Vault '{vault}' gehört nicht zur Instanz '{inst.name}'. "
                 f"Erlaubt: {', '.join(sorted(vault_names))}"
             )
+        error = _validate_collections(vault, collection_ids)
+        if error:
+            return error
         # Payload wie Gateway/CLI über build_payload ableiten (eine Stelle für
         # die Snippet-Titel-Logik) — vermeidet die frühere Titel-Divergenz,
         # bei der der Titel roh abgeschnitten statt via snippet_title() gebaut wurde.
         kind, payload = build_payload(content)
         if node_set:
             payload["node_set"] = node_set
+        if collection_ids:
+            payload["collection_ids"] = collection_ids
         q = JobQueue(queue_path(instance_name))
         jid = q.enqueue(vault, kind, payload)
         return f"queued job {jid} ({kind}) -> {vault}"

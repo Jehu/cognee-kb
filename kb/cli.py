@@ -32,7 +32,7 @@ from kb.envutil import strip_quotes
 from kb.maintenance import audit_instance
 from kb.maintenance import repair as repair_maintenance
 from kb.queue import JobQueue
-from kb.sources import SourceStore
+from kb.sources import CollectionValidationError, SourceStore
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -53,14 +53,46 @@ def add(vault: str, path: Path) -> None:
     typer.echo(f"ingested: {path} -> {v.dataset}")
 
 
+def _collection_ids(vault: Vault, labels: list[str]) -> list[str]:
+    store = SourceStore(sources_path(vault.instance))
+    try:
+        return store.resolve_collection_labels(vault.name, labels)
+    except CollectionValidationError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--collection") from None
+    finally:
+        store.close()
+
+
+@app.command("collections")
+def collections_cmd(vault: str) -> None:
+    """Listet aktive Sammlungen eines Vaults (read-only)."""
+    try:
+        v = get_vault(vault)
+    except UnknownVaultError:
+        raise typer.BadParameter(f"Unbekannter Vault: {vault}") from None
+    store = SourceStore(sources_path(v.instance))
+    try:
+        for collection in store.list_collections(v.name):
+            typer.echo(f"{collection.id}\t{collection.label}")
+    finally:
+        store.close()
+
+
 @app.command()
-def query(vault: str, question: str) -> None:
+def query(
+    vault: str,
+    question: str,
+    collection: list[str] = typer.Option(None, "--collection", help="Sammlungsname (mehrfach)"),
+) -> None:
     """Stellt eine evidenzgebundene Frage an einen Vault."""
     v, inst = _load(vault)
     store = SourceStore(sources_path(v.instance))
     try:
+        kwargs = {}
+        if collection:
+            kwargs["collection_ids"] = _collection_ids(v, collection)
         result = asyncio.run(
-            query_service.answer(inst, question, datasets=[v.dataset], store=store)
+            query_service.answer(inst, question, datasets=[v.dataset], store=store, **kwargs)
         )
     finally:
         store.close()
@@ -68,10 +100,24 @@ def query(vault: str, question: str) -> None:
 
 
 @app.command()
-def search(vault: str, question: str) -> None:
+def search(
+    vault: str,
+    question: str,
+    collection: list[str] = typer.Option(None, "--collection", help="Sammlungsname (mehrfach)"),
+) -> None:
     """Liefert gerankte Evidenz aus einem Vault, ohne Antwort-Synthese."""
     v, inst = _load(vault)
-    evidence = asyncio.run(cognee_io.retrieve(inst, question, datasets=[v.dataset]))
+    store = SourceStore(sources_path(v.instance))
+    try:
+        kwargs = {}
+        if collection:
+            kwargs["collection_ids"] = _collection_ids(v, collection)
+        result = asyncio.run(
+            query_service.search(inst, question, datasets=[v.dataset], store=store, **kwargs)
+        )
+    finally:
+        store.close()
+    evidence = result.evidence
     if not evidence:
         typer.echo("Keine Evidenz gefunden.")
         return
@@ -157,7 +203,12 @@ def eval_cmd(vault: str = "privat", out: Path = ROOT / "eval" / "antworten-cogne
 
 
 @app.command()
-def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None:
+def ingest(
+    vault: str,
+    content: str,
+    node_set: str = typer.Option(None),
+    collection: list[str] = typer.Option(None, "--collection", help="Sammlungsname (mehrfach)"),
+) -> None:
     """Wirft Input in die Queue des zuständigen Workers."""
     try:
         v = get_vault(vault)
@@ -175,6 +226,8 @@ def ingest(vault: str, content: str, node_set: str = typer.Option(None)) -> None
         kind, payload = build_payload(content)
     if node_set:
         payload["node_set"] = node_set
+    if collection:
+        payload["collection_ids"] = _collection_ids(v, collection)
     q = JobQueue(queue_path(v.instance))
     jid = q.enqueue(v.name, kind, payload)
     typer.echo(f"queued: job {jid} ({kind}) -> {v.name}")
@@ -225,6 +278,7 @@ def import_cmd(
     vault: str,
     path: Path,
     node_set: str = typer.Option(None, "--node-set"),
+    collection: list[str] = typer.Option(None, "--collection", help="Sammlungsname (mehrfach)"),
     exclude: list[str] = typer.Option(None, "--exclude", "-x", help="Glob-Ausschluss (mehrfach)"),
     only_newer_than: str = typer.Option(
         None,
@@ -253,6 +307,7 @@ def import_cmd(
         typer.echo(f"Pfad nicht gefunden: {path}", err=True)
         raise typer.Exit(1) from None
     cutoff = _parse_cutoff(only_newer_than) if only_newer_than else None
+    collection_ids = _collection_ids(v, collection) if collection else []
 
     if path.is_file():
         files = [path] if path.suffix.lower() in (".md", ".txt") else []
@@ -295,6 +350,8 @@ def import_cmd(
         payload: dict[str, object] = {"path": str(f.resolve())}
         if node_set:
             payload["node_set"] = node_set
+        if collection_ids:
+            payload["collection_ids"] = collection_ids
         assert q is not None  # dry_run ist hier False
         q.enqueue(v.name, "file", payload)
         enqueued += 1

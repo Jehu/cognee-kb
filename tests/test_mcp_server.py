@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 
 import httpx
@@ -7,6 +8,7 @@ import pytest
 from kb import mcp_server, query_proxy
 from kb.config import INSTANCES, VAULTS, get_instance
 from kb.queue import JobQueue
+from kb.sources import SourceStore
 
 
 def _tool_names(server) -> set[str]:
@@ -44,7 +46,7 @@ def test_tools_registered_from_instance_vaults():
         expected = (
             {mcp_server._tool_name(v.name) for v in inst_vaults}
             | {mcp_server._retrieval_tool_name(v.name) for v in inst_vaults}
-            | {"ingest", "job_status"}
+            | {"ingest", "job_status", "list_collections"}
         )
         if len(inst_vaults) > 1:
             expected.add("search_all")
@@ -61,6 +63,21 @@ def test_retrieval_tool_returns_evidence_json(monkeypatch):
     server = mcp_server.build_server("local")
     result = asyncio.run(_call(server, "retrieve_privat", question="Belege?"))
     assert '"evidence_id": "e1"' in result
+
+
+def test_list_collections_returns_structured_active_records(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_server, "sources_path", lambda inst: tmp_path / f"{inst}.db")
+    store = SourceStore(tmp_path / "local.db")
+    collection = store.create_collection("privat", "Projekt Alpha")
+    store.close()
+    server = mcp_server.build_server("local")
+
+    result = asyncio.run(_call(server, "list_collections", vault="privat"))
+
+    assert json.loads(result) == {
+        "vault": "privat",
+        "collections": [{"id": collection.id, "label": "Projekt Alpha"}],
+    }
 
 
 # --- Ingest ---
@@ -102,6 +119,70 @@ def test_ingest_plain_text_snippet(tmp_path, monkeypatch):
     server = mcp_server.build_server("cloud")
     msg = asyncio.run(_call(server, "ingest", vault="business-ki", content="Nur ein Gedanke."))
     assert "(snippet)" in msg
+
+
+def test_ingest_accepts_valid_collection_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / "queue.db")
+    monkeypatch.setattr(mcp_server, "sources_path", lambda inst: tmp_path / "sources.db")
+    store = SourceStore(tmp_path / "sources.db")
+    collection = store.create_collection("privat", "Projekt")
+    store.close()
+    server = mcp_server.build_server("local")
+
+    msg = asyncio.run(
+        _call(server, "ingest", vault="privat", content="Notiz", collection_ids=[collection.id])
+    )
+
+    assert "queued job" in msg
+    row = (
+        JobQueue(tmp_path / "queue.db")
+        .conn.execute("SELECT payload FROM jobs WHERE id=1")
+        .fetchone()
+    )
+    assert json.loads(row[0])["collection_ids"] == [collection.id]
+
+
+def test_ingest_rejects_cross_vault_and_more_than_ten_collections(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_server, "queue_path", lambda inst: tmp_path / "queue.db")
+    monkeypatch.setattr(mcp_server, "sources_path", lambda inst: tmp_path / "sources.db")
+    store = SourceStore(tmp_path / "sources.db")
+    foreign = store.create_collection("allgemein", "Fremd")
+    store.close()
+    server = mcp_server.build_server("cloud")
+
+    cross_vault = asyncio.run(
+        _call(server, "ingest", vault="business-ki", content="Notiz", collection_ids=[foreign.id])
+    )
+    too_many = asyncio.run(
+        _call(
+            server,
+            "ingest",
+            vault="allgemein",
+            content="Notiz",
+            collection_ids=[str(i) for i in range(11)],
+        )
+    )
+
+    assert "zum Vault" in cross_vault
+    assert "höchstens 10" in too_many
+    assert not (tmp_path / "queue.db").exists()
+
+
+def test_search_accepts_collection_ids_and_forwards_scope(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_server, "sources_path", lambda inst: tmp_path / "sources.db")
+    store = SourceStore(tmp_path / "sources.db")
+    collection = store.create_collection("privat", "Projekt")
+    store.close()
+    calls = []
+
+    async def fake_query(instance, question, datasets, request_id=None, collection_ids=None):
+        calls.append(collection_ids)
+        return {"answer": "42"}
+
+    monkeypatch.setattr(mcp_server, "proxy_query", fake_query)
+    server = mcp_server.build_server("local")
+    asyncio.run(_call(server, "search_privat", question="Was?", collection_ids=[collection.id]))
+    assert calls == [[collection.id]]
 
 
 def test_ingest_snippet_uses_build_payload_title(tmp_path, monkeypatch):

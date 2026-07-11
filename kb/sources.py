@@ -351,6 +351,23 @@ class SourceStore:
         ).fetchall()
         return [CollectionRecord(*row) for row in rows]
 
+    def resolve_collection_labels(self, vault: str, labels: list[str]) -> list[str]:
+        """Löst aktive, nutzerfreundliche Namen in stabile IDs auf."""
+        if len(labels) > 10:
+            raise CollectionValidationError("Höchstens 10 Collections sind erlaubt")
+        normalized = [_normalize_collection_label(label)[1] for label in labels]
+        if len(set(normalized)) != len(normalized):
+            raise CollectionValidationError("Collection-Namen müssen eindeutig sein")
+        active = {record.normalized_label: record.id for record in self.list_collections(vault)}
+        missing = [
+            label for label, key in zip(labels, normalized, strict=True) if key not in active
+        ]
+        if missing:
+            raise CollectionValidationError(
+                "Unbekannte oder archivierte Collection: " + ", ".join(missing)
+            )
+        return [active[key] for key in normalized]
+
     def rename_collection(self, vault: str, collection_id: str, label: str) -> CollectionRecord:
         self.get_collection(vault, collection_id)
         display, normalized = _normalize_collection_label(label)

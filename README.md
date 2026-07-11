@@ -65,9 +65,18 @@ Beispiele:
 uv run kb ingest privat "Eine private Notiz"
 uv run kb ingest allgemein https://example.com/artikel
 uv run kb ingest business-ki ./bericht.pdf
+uv run kb ingest allgemein ./bericht.pdf --collection "Projekt Alpha" --collection Recherche
 ```
 
 Der Inhalt wird zunächst in die serielle Queue gelegt. Der Worker lädt beziehungsweise extrahiert die Quelle, schreibt eine kanonische Markdown-Kopie nach `raw/<vault>/` und übergibt sie anschließend an Cognee.
+
+Aktive Sammlungen und ihre stabilen IDs lassen sich read-only auflisten:
+
+```sh
+uv run kb collections <vault>
+```
+
+`--collection <name>` ist bei `ingest` und `import` wiederholbar. Namen werden innerhalb des gewählten Vaults aufgelöst; unbekannte, archivierte, doppelte oder mehr als zehn Sammlungen werden vor dem Enqueue abgelehnt. Erstellen, Umbenennen und Archivieren bleiben der authentifizierten PWA beziehungsweise Gateway-API vorbehalten.
 
 ### Bestehende Markdown-Sammlungen importieren
 
@@ -108,12 +117,14 @@ Unter **Einstellungen** lassen sich Sammlungsnamen pro Vault umbenennen, Sammlun
 
 ```sh
 uv run kb query <vault> "Frage"
+uv run kb query <vault> "Frage" --collection "Projekt Alpha" --collection Recherche
 ```
 
 ### Nur Evidenz abrufen
 
 ```sh
 uv run kb search <vault> "Frage"
+uv run kb search <vault> "Frage" --collection "Projekt Alpha"
 ```
 
 `search` liefert gerankte Chunks ohne Antwort-Synthese und damit ohne zusätzlichen Synthese-LLM-Aufruf.
@@ -146,8 +157,11 @@ Der jeweilige Instance Service muss bereits laufen. Die verfügbaren Werkzeuge w
 - `search_<vault>` erzeugt eine evidenzgebundene Antwort.
 - `retrieve_<vault>` liefert gerankte Evidenz ohne Synthese.
 - `search_all` und `retrieve_all` existieren bei Walls mit mehreren Vaults.
+- `list_collections` liefert aktive Sammlungen eines Vaults mit stabiler ID und Anzeigename.
 - `ingest` legt Inhalte in die Queue.
 - `job_status` prüft einen Queue-Job.
+
+`ingest`, `search_<vault>` und `retrieve_<vault>` akzeptieren optional bis zu zehn stabile `collection_ids`. Die IDs müssen aktiv sein und zum jeweiligen Vault gehören. `search_all` und `retrieve_all` besitzen absichtlich keinen Sammlungsfilter, weil Sammlungs-IDs Vault-spezifisch sind. MCP kann Sammlungen entdecken und verwenden, aber nicht erstellen, umbenennen, archivieren, wiederherstellen oder bestehende Quellen neu zuordnen.
 
 MCP-Server immer im **Project Scope** registrieren:
 

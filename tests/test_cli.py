@@ -11,12 +11,17 @@ from kb.sources import SourceRecord, SourceStore
 runner = CliRunner()
 
 
-def test_search_prints_ranked_evidence_without_answer(monkeypatch):
-    async def fake_retrieve(instance, question, datasets):
-        return [EvidenceChunk(evidence_id="e1", rank=1, text="Beleg", source_ids=["sid1"])]
+def test_search_prints_ranked_evidence_without_answer(monkeypatch, tmp_path):
+    from kb.query_models import QueryResult
+
+    async def fake_search(instance, question, datasets, store):
+        return QueryResult(
+            evidence=[EvidenceChunk(evidence_id="e1", rank=1, text="Beleg", source_ids=["sid1"])]
+        )
 
     monkeypatch.setattr("kb.cli.cognee_io.load_instance_env", lambda inst: None)
-    monkeypatch.setattr("kb.cli.cognee_io.retrieve", fake_retrieve)
+    monkeypatch.setattr("kb.cli.query_service.search", fake_search)
+    monkeypatch.setattr("kb.cli.sources_path", lambda instance: tmp_path / "sources.db")
 
     result = runner.invoke(app, ["search", "privat", "Belege?"])
 
@@ -39,6 +44,47 @@ def test_query_uses_evidence_grounded_query_service(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert result.output.strip() == "Belegte Antwort"
+
+
+def test_query_resolves_repeatable_collection_labels(monkeypatch, tmp_path):
+    from kb.query_models import QueryResult
+
+    store = SourceStore(tmp_path / "sources.db")
+    one = store.create_collection("privat", "Projekt Alpha")
+    two = store.create_collection("privat", "Recherche")
+    store.close()
+    calls = []
+
+    async def fake_answer(instance, question, datasets, store, collection_ids=None):
+        calls.append(collection_ids)
+        return QueryResult(answer="Belegt")
+
+    monkeypatch.setattr("kb.cli.cognee_io.load_instance_env", lambda inst: None)
+    monkeypatch.setattr("kb.cli.query_service.answer", fake_answer)
+    monkeypatch.setattr("kb.cli.sources_path", lambda instance: tmp_path / "sources.db")
+
+    result = runner.invoke(
+        app,
+        ["query", "privat", "Frage?", "--collection", "projekt alpha", "--collection", "Recherche"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [[one.id, two.id]]
+
+
+def test_collections_lists_active_labels_without_mutation_commands(monkeypatch, tmp_path):
+    store = SourceStore(tmp_path / "sources.db")
+    store.create_collection("privat", "Projekt Alpha")
+    archived = store.create_collection("privat", "Alt")
+    store.archive_collection("privat", archived.id)
+    store.close()
+    monkeypatch.setattr("kb.cli.sources_path", lambda instance: tmp_path / "sources.db")
+
+    result = runner.invoke(app, ["collections", "privat"])
+
+    assert result.exit_code == 0
+    assert "Projekt Alpha" in result.output
+    assert "Alt" not in result.output
 
 
 def test_diagnose_query_redacts_evidence_content(monkeypatch, tmp_path):
@@ -110,6 +156,25 @@ def test_ingest_plain_text_stays_snippet(tmp_path, monkeypatch):
     result = runner.invoke(app, ["ingest", "privat", "Nur ein Gedanke."])
     assert result.exit_code == 0
     assert "(snippet)" in result.output
+
+
+def test_ingest_resolves_collection_labels_to_ids(tmp_path, monkeypatch):
+    _patch_io(monkeypatch, tmp_path)
+    store = SourceStore(tmp_path / "local_s.db")
+    collection = store.create_collection("privat", "Projekt Alpha")
+    store.close()
+
+    result = runner.invoke(app, ["ingest", "privat", "Notiz", "--collection", "projekt alpha"])
+
+    assert result.exit_code == 0, result.output
+    row = (
+        JobQueue(tmp_path / "local_q.db")
+        .conn.execute("SELECT payload FROM jobs WHERE id=1")
+        .fetchone()
+    )
+    import json
+
+    assert json.loads(row[0])["collection_ids"] == [collection.id]
 
 
 def test_ingest_rejects_unknown_vault(tmp_path, monkeypatch):
