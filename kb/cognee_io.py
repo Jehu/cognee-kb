@@ -33,6 +33,16 @@ _SOURCE_ID_RE = re.compile(
 _MAX_RELATED_SOURCES = 1
 
 
+async def _authenticated_user() -> object | None:
+    """Bindet SDK-Aufrufe bei aktiver ACL explizit an den persistenten Default-User."""
+    if os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", "").lower() != "true":
+        return None
+    from cognee.modules.users.methods import get_default_user
+
+    user: object = await get_default_user()
+    return user
+
+
 def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
     """Lädt das Env-File der Instanz in os.environ (VOR dem ersten cognee-Import!)."""
     path = env_path or instance.env_file
@@ -74,16 +84,23 @@ async def ingest(
     import cognee  # lazy: erst nach load_instance_env importieren
 
     async with _COGNEE_LOCK:
-        result = await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
-        await cognee.cognify(datasets=[dataset])
+        user = await _authenticated_user()
+        result = await cognee.add(
+            str(file_path), dataset_name=dataset, node_set=node_sets or None, user=user
+        )
+        await cognee.cognify(datasets=[dataset], user=user)
         dataset_id, data_id = _ingest_ids(result)
         if not dataset_id or not data_id:
             dataset_record = next(
-                (item for item in await cognee.datasets.list_datasets() if item.name == dataset),
+                (
+                    item
+                    for item in await cognee.datasets.list_datasets(user=user)
+                    if item.name == dataset
+                ),
                 None,
             )
             if dataset_record is not None:
-                data = await cognee.datasets.list_data(dataset_record.id)
+                data = await cognee.datasets.list_data(dataset_record.id, user=user)
                 provenance = node_sets[0] if node_sets else None
                 match = next(
                     (
@@ -109,7 +126,8 @@ async def delete_source(
     import cognee
 
     async with _COGNEE_LOCK:
-        data = await cognee.datasets.list_data(dataset_id)
+        user = await _authenticated_user()
+        data = await cognee.datasets.list_data(dataset_id, user=user)
         matches = [
             item
             for item in data
@@ -117,7 +135,7 @@ async def delete_source(
             or (provenance_node_set is not None and provenance_node_set in (item.node_set or []))
         ]
         for item in matches:
-            await cognee.datasets.delete_data(dataset_id, item.id)
+            await cognee.datasets.delete_data(dataset_id, item.id, user=user)
 
 
 async def query(instance: Instance, question: str, datasets: list[str]) -> str:
@@ -126,10 +144,12 @@ async def query(instance: Instance, question: str, datasets: list[str]) -> str:
     from cognee import SearchType
 
     async with _COGNEE_LOCK:
+        user = await _authenticated_user()
         results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION,
             query_text=question,
             datasets=datasets,
+            user=user,
         )
     return "\n".join(_render(r) for r in results)
 
@@ -212,6 +232,8 @@ async def retrieve(
             node_name_filter_operator="OR",
         )
     async with _COGNEE_LOCK:
+        user = await _authenticated_user()
+        search_kwargs["user"] = user
         results = await cognee.search(**search_kwargs)
 
     evidence = []
@@ -272,10 +294,12 @@ async def query_with_sources(
     from cognee import SearchType
 
     async with _COGNEE_LOCK:
+        user = await _authenticated_user()
         results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION,
             query_text=question,
             datasets=datasets,
+            user=user,
         )
         answer = "\n".join(_render(r) for r in results)
 
@@ -284,6 +308,7 @@ async def query_with_sources(
                 query_type=SearchType.CHUNKS,
                 query_text=question,
                 datasets=datasets,
+                user=user,
             )
             source_ids = _extract_source_ids(chunk_results)[:_MAX_RELATED_SOURCES]
         except Exception as e:  # noqa: BLE001 — Quellen sind Komfort, Antwort ist Pflicht

@@ -28,7 +28,7 @@ async def search(
     evidence = await cognee_io.retrieve(
         instance, question, datasets=datasets, node_names=node_names or None, top_k=100
     )
-    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids)
+    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids, store)
     result = QueryResult(
         answer=None,
         evidence=evidence,
@@ -61,7 +61,7 @@ async def answer(
                 )
             ]
         )
-    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids)
+    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids, store)
     if not evidence:
         return compose_result(response=SynthesisResponse(), evidence=[])
     retrieval_ms = (perf_counter() - retrieval_started) * 1000
@@ -94,13 +94,13 @@ async def answer(
 
 
 def _filter_evidence_sources(
-    evidence: list[EvidenceChunk], allowed_source_ids: set[str]
+    evidence: list[EvidenceChunk], allowed_source_ids: set[str], store: SourceStore
 ) -> tuple[list[EvidenceChunk], list[GapSignal]]:
     filtered: list[EvidenceChunk] = []
     gaps: list[GapSignal] = []
     for item in evidence:
         for source_id in item.source_ids:
-            if source_id not in allowed_source_ids:
+            if source_id not in allowed_source_ids and store.get(source_id) is None:
                 gaps.append(
                     GapSignal(
                         kind="unresolved_source",

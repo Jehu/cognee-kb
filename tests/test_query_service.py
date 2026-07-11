@@ -84,7 +84,7 @@ async def test_search_strips_cross_vault_source_ids(tmp_path, monkeypatch):
     result = await query_service.search(get_instance("local"), "?", ["privat"], store)
 
     assert result.evidence == []
-    assert [gap.kind for gap in result.gaps] == ["unresolved_source"]
+    assert result.gaps == []
 
 
 @pytest.mark.asyncio

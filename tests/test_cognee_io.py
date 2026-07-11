@@ -216,7 +216,13 @@ def test_retrieve_returns_ranked_evidence_without_graph_completion(monkeypatch):
     assert evidence[0].source_ids == [_UUID]
     assert evidence[1].source_ids == []
     assert calls == [
-        {"query_type": "chunks", "query_text": "Frage?", "datasets": ["privat"], "top_k": 100}
+        {
+            "query_type": "chunks",
+            "query_text": "Frage?",
+            "datasets": ["privat"],
+            "top_k": 100,
+            "user": None,
+        }
     ]
 
 
@@ -253,6 +259,7 @@ def test_retrieve_passes_native_nodeset_or_filter_and_bounded_top_k(monkeypatch)
             "node_name": ["collection:a", "collection:b"],
             "node_name_filter_operator": "OR",
             "top_k": 100,
+            "user": None,
         }
     ]
 

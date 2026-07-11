@@ -491,7 +491,14 @@ def _pids_on_port(port: int) -> list[int]:
 
 def _kill_pid(pid: int, sig: int) -> None:
     try:
-        os.kill(pid, sig)
+        # `up` startet jeden Dienst als eigene Session. Cognee 1.2 erzeugt
+        # Ladybug/LanceDB-Kinder, die sonst den Store-Lock über einen Restart
+        # hinaus halten. Nur echte Gruppenleiter als ganze Gruppe beenden;
+        # Prozesse aus `kb serve` teilen sich dagegen bewusst die Parent-Gruppe.
+        if os.getpgid(pid) == pid:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
     except ProcessLookupError:
         pass  # schon weg
 

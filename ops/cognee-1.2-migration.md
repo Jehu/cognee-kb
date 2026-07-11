@@ -48,10 +48,20 @@ unveränderten Source-ID als Provenance-NodeSet und den aktuell gewünschten
 `collection:<uuid>`-NodeSets in ein leeres, versioniertes Ziel geschrieben.
 `dataset_id` und `data_id` werden in einer Kopie von `sources.db` aktualisiert.
 
-Dieser Schritt ist absichtlich kein allgemeiner Online-Befehl: Vor Ausführung
-wird das konkrete, kopierte Ziel mit dem in `tests/test_cognee_cloud_gate.py`
-verwendeten Rebuild-Verfahren erzeugt und vollständig geprüft. Niemals die
-gesicherten 0.3.9-Verzeichnisse als Ziel konfigurieren.
+```sh
+uv run python ops/rebuild_cognee_store.py local var/migrations/rebuild-local-1.2.2
+uv run python ops/rebuild_cognee_store.py cloud var/migrations/rebuild-cloud-1.2.2 --batch-by-vault
+```
+
+Ein unterbrochener Vault-Batch kann nach Prüfung des isolierten Ziels
+inkrementell fortgesetzt werden:
+
+```sh
+uv run python ops/rebuild_cognee_store.py cloud var/migrations/rebuild-cloud-1.2.2 \
+  --resume-vault business-ki
+```
+
+Niemals die gesicherten 0.3.9-Verzeichnisse als Ziel konfigurieren.
 
 ## 4. Prüfen und atomar umschalten
 
@@ -85,3 +95,19 @@ zurückschalten. Der Code unterstützt danach nicht Cognee 0.3.9; ein vollständ
 Rollback umfasst deshalb auch den zuvor gesicherten Code-/Lockfile-Stand. Erst
 nach erneuter Prüfung wieder starten. Alte Stores werden erst nach einem
 separaten, bestätigten Aufbewahrungszeitraum entfernt.
+
+## Protokoll 2026-07-11
+
+- Backup: `var/migrations/20260711-221527`, 1.638 Dateien, SHA-256 geprüft.
+- Local: 2 Quellen, ungefähr 5 Minuten; echter CHUNKS-Service-Smoke-Test grün.
+- Cloud: 52 Quellen, ungefähr 7 Minuten im finalen Vault-Batch. Ein vorheriger
+  ACL-Lauf wurde ohne Cutover verworfen; zwei hängende Provider-Requests wurden
+  im isolierten Ziel abgebrochen und inkrementell erfolgreich fortgesetzt.
+- Cognee 1.2.2 aktiviert Multi-Tenant-ACL standardmäßig. Für `kb` ist sie in
+  beiden Single-User-Walls explizit deaktiviert: Wall-Trennung ist physisch,
+  Vault-Trennung wird durch Dataset-Scope plus vollständige lokale
+  Source-Allowlist erzwungen.
+- Echte Service-Abfragen nach Prozessneustart bestätigten Local, `allgemein`
+  und `business-ki`.
+- `kb restart` beendet die vollständige detached Prozessgruppe, damit
+  Cognee-DB-Worker keinen Ladybug-Lock über den Neustart hinaus halten.
