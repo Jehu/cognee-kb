@@ -39,6 +39,7 @@ row when done.
 | 026  | `kb import` Markdown migration | P2 | S | — | DONE | → #26 |
 | 027  | Sources list (delete separat) | P2 | S | — | DONE | → #27 |
 | 028  | PDF connector | P3 | S | 004 | DONE | → #28 |
+| 029  | GBrain-inspired knowledge quality (6 capabilities) | P2 | XL | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
