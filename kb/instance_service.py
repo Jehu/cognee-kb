@@ -69,6 +69,7 @@ def create_app(instance_name: str) -> FastAPI:
         q = JobQueue(inst.var_dir / "queue.db")
         store = SourceStore(inst.var_dir / "sources.db")
         q.recover_stale()  # genau ein Worker pro Instanz — gefahrlos
+        store.dispatch_reindex_events(q)  # Outbox-Crash-Lücken vor Workerstart schließen
         # Selber Event-Loop wie die Request-Handler — kein Thread, kein neuer Loop.
         task = asyncio.create_task(worker.run_forever_async(inst, q, store))
         task.add_done_callback(_log_worker_death)

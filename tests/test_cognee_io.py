@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,6 +9,8 @@ from kb.cognee_io import (
     _extract_source_ids,
     _iter_strings,
     _render,
+    delete_source,
+    ingest,
     load_instance_env,
     query_with_sources,
     retrieve,
@@ -61,6 +64,68 @@ def test_strip_quotes_unit():
     assert strip_quotes("plain") == "plain"
     assert strip_quotes('a"b') == 'a"b'  # ungepaart -> unangetastet
     assert strip_quotes('""') == ""
+
+
+@pytest.mark.asyncio
+async def test_ingest_returns_dataset_and_data_ids_defensively(monkeypatch, tmp_path):
+    async def add(*args, **kwargs):
+        return [SimpleNamespace(id="data-9", dataset_id="dataset-7")]
+
+    async def cognify(*args, **kwargs):
+        return None
+
+    monkeypatch.setitem(sys.modules, "cognee", SimpleNamespace(add=add, cognify=cognify))
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+    assert await ingest(None, tmp_path / "x.md", "vault", ["source", "collection:x"]) == (
+        "dataset-7",
+        "data-9",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_resolves_ids_from_dataset_when_add_returns_none(monkeypatch, tmp_path):
+    async def add(*args, **kwargs):
+        return None
+
+    async def cognify(*args, **kwargs):
+        return None
+
+    datasets = SimpleNamespace(
+        list_datasets=AsyncMock(return_value=[SimpleNamespace(id="ds", name="vault")]),
+        list_data=AsyncMock(
+            return_value=[SimpleNamespace(id="data", node_set=["source", "collection:x"])]
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules, "cognee", SimpleNamespace(add=add, cognify=cognify, datasets=datasets)
+    )
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+    assert await ingest(None, tmp_path / "x.md", "vault", ["source", "collection:x"]) == (
+        "ds",
+        "data",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_source_cleans_old_and_partial_retry_data(monkeypatch):
+    delete_data = AsyncMock()
+    datasets = SimpleNamespace(
+        list_data=AsyncMock(
+            return_value=[
+                SimpleNamespace(id="old", node_set=["source"]),
+                SimpleNamespace(id="partial", node_set=["source", "collection:new"]),
+                SimpleNamespace(id="other", node_set=["other"]),
+            ]
+        ),
+        delete_data=delete_data,
+    )
+    monkeypatch.setitem(sys.modules, "cognee", SimpleNamespace(datasets=datasets))
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+    await delete_source(None, "ds", "old", provenance_node_set="source")
+    assert [call.args for call in delete_data.await_args_list] == [
+        ("ds", "old"),
+        ("ds", "partial"),
+    ]
 
 
 class _StubSearchResult:

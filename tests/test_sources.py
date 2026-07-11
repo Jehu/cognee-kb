@@ -244,6 +244,22 @@ def test_invalid_replacement_rolls_back_desired_state_revision_and_outbox(tmp_pa
     assert store.pending_reindex_events() == before_events
 
 
+def test_outbox_remains_undelivered_when_queue_insert_crashes(tmp_path):
+    store = SourceStore(tmp_path / "sources.db")
+    source = make_record()
+    store.insert(source)
+    collection = store.create_collection("privat", "Projekt")
+    store.replace_desired_collections(source.id, [collection.id])
+
+    class BrokenQueue:
+        def enqueue_reindex(self, *args):
+            raise RuntimeError("queue unavailable")
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        store.dispatch_reindex_events(BrokenQueue())
+    assert len(store.pending_reindex_events()) == 1
+
+
 def test_stale_completion_does_not_clear_newer_failure(tmp_path):
     store = SourceStore(tmp_path / "sources.db")
     source = make_record()

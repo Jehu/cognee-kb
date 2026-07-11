@@ -46,3 +46,15 @@ def test_node_sets_lists_unique_explicit_sets_for_vault(tmp_path):
     q.enqueue("business-ki", "snippet", {"text": "d", "node_set": "fremd"})
 
     assert q.node_sets("privat") == ["projekt-a", "projekt-b"]
+
+
+def test_enqueue_reindex_is_idempotent_per_source_revision(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    first = q.enqueue_reindex("privat", "source-1", 2)
+    second = q.enqueue_reindex("privat", "source-1", 2)
+
+    assert second == first
+    assert q.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
+    job = q.claim_next()
+    assert job.kind == "collection_reindex"
+    assert job.payload == {"source_id": "source-1", "revision": 2}

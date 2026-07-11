@@ -60,6 +60,7 @@ class IngestBody(BaseModel):
     vault: str
     content: str = Field(min_length=1)
     node_set: str | None = None
+    collection_ids: list[str] = Field(default_factory=list, max_length=10)
 
     @field_validator("content")
     @classmethod
@@ -78,6 +79,17 @@ class QueryBody(BaseModel):
 
 class CollectionLabelBody(BaseModel):
     label: str
+
+
+class CollectionAssignmentBody(BaseModel):
+    collection_ids: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("collection_ids")
+    @classmethod
+    def _unique_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("collection_ids müssen eindeutig sein")
+        return value
 
 
 def _collection_view(store: SourceStore, collection: CollectionRecord) -> dict[str, object]:
@@ -147,6 +159,13 @@ def create_app() -> FastAPI:
         kind, payload = build_payload(body.content)
         if body.node_set:
             payload["node_set"] = body.node_set
+        if body.collection_ids:
+            store = SourceStore(sources_path(v.instance))
+            try:
+                store.validate_collection_ids(v.name, body.collection_ids)
+            except CollectionValidationError as exc:
+                raise HTTPException(422, str(exc)) from None
+            payload["collection_ids"] = body.collection_ids
         payload["request_id"] = request.state.request_id  # für Worker-Log-Korrelation
         # JobQueue pro Request — sqlite3-Verbindungen sind thread-gebunden.
         q = JobQueue(queue_path(v.instance))
@@ -331,6 +350,27 @@ def create_app() -> FastAPI:
             "sync_status": sync.collection_sync_status,
             "sync_error": sync.collection_sync_error,
             "sync_updated_at": sync.collection_sync_updated_at,
+        }
+
+    @api.put("/sources/{vault}/{source_id}/collections", status_code=202)
+    def reassign_source_collections(
+        vault: str, source_id: str, body: CollectionAssignmentBody
+    ) -> dict[str, object]:
+        v = _resolve_vault(vault)
+        store = SourceStore(sources_path(v.instance))
+        source = store.get(source_id)
+        if source is None or source.vault != v.name:
+            raise HTTPException(404, "Unbekannte Quelle")
+        try:
+            sync = store.replace_desired_collections(source_id, body.collection_ids)
+            queue = JobQueue(queue_path(v.instance))
+            store.dispatch_reindex_events(queue)
+        except CollectionValidationError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {
+            "source_id": source_id,
+            "collection_revision": sync.collection_revision,
+            "sync_status": sync.collection_sync_status,
         }
 
     app.include_router(api)

@@ -49,7 +49,7 @@ Die PWA wird vom Gateway auf Port `8800` ausgeliefert. Beim ersten Aufruf den `K
 
 ### Über die PWA
 
-Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Optional können Metadaten und ein Node-Set angegeben werden. Der Fortschritt des Queue-Jobs wird direkt angezeigt.
+Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Optional können Metadaten und ein Node-Set angegeben werden. Der Fortschritt des Queue-Jobs wird direkt angezeigt. Die Gateway-API kann Quellen außerdem bis zu zehn Vault-eigenen Sammlungen zuordnen. Änderungen an einer Zuordnung werden quellbezogen im Hintergrund neu indexiert; der bisher bestätigte Indexstand bleibt bei Fehlern erhalten und kann erneut synchronisiert werden.
 
 Ohne gültigen Gateway-Token bleiben Vault-Auswahl, Capture und Chat gesperrt.
 

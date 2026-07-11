@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import unicodedata
 import uuid
@@ -41,7 +42,10 @@ CREATE TABLE IF NOT EXISTS sources (
     collection_sync_status TEXT NOT NULL DEFAULT 'synced'
         CHECK (collection_sync_status IN ('pending','synced','failed')),
     collection_sync_error TEXT,
-    collection_sync_updated_at TEXT
+    collection_sync_updated_at TEXT,
+    cognee_dataset_id TEXT,
+    cognee_data_id TEXT,
+    cognee_provenance_node_sets TEXT
 );
 
 CREATE TABLE IF NOT EXISTS collections (
@@ -226,6 +230,9 @@ class SourceStore:
             ("collection_sync_status", "TEXT NOT NULL DEFAULT 'synced'"),
             ("collection_sync_error", "TEXT"),
             ("collection_sync_updated_at", "TEXT"),
+            ("cognee_dataset_id", "TEXT"),
+            ("cognee_data_id", "TEXT"),
+            ("cognee_provenance_node_sets", "TEXT"),
         )
         for col, definition in migrations:
             try:
@@ -395,6 +402,96 @@ class SourceStore:
     def indexed_collection_ids(self, source_id: str) -> list[str]:
         return self._collection_ids("source_indexed_collections", source_id)
 
+    def collection_node_set_keys(self, source_id: str, *, desired: bool = True) -> list[str]:
+        table = "source_desired_collections" if desired else "source_indexed_collections"
+        rows = self.conn.execute(
+            f"SELECT c.node_set_key FROM {table} a JOIN collections c "
+            "ON c.id=a.collection_id WHERE a.source_id=? ORDER BY a.display_order",
+            (source_id,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def initialize_collections(
+        self,
+        source_id: str,
+        collection_ids: list[str],
+        *,
+        cognee_dataset_id: str | None,
+        cognee_data_id: str | None,
+        provenance_node_sets: list[str] | None = None,
+    ) -> None:
+        """Publiziert initiale Membership erst nach erfolgreichem Cognify."""
+        if len(collection_ids) > 10 or len(set(collection_ids)) != len(collection_ids):
+            raise CollectionValidationError(
+                "Eine Quelle erlaubt höchstens 10 eindeutige Collections"
+            )
+        source = self.get(source_id)
+        if source is None:
+            raise CollectionValidationError("Quelle existiert nicht")
+        self.validate_collection_ids(source.vault, collection_ids)
+        with self.conn:
+            for table in ("source_desired_collections", "source_indexed_collections"):
+                self.conn.executemany(
+                    f"INSERT INTO {table}(source_id,collection_id,display_order) VALUES(?,?,?)",
+                    [(source_id, cid, index) for index, cid in enumerate(collection_ids)],
+                )
+            self.conn.execute(
+                "UPDATE sources SET cognee_dataset_id=?,cognee_data_id=?,"
+                "cognee_provenance_node_sets=?,"
+                "collection_sync_status='synced',collection_sync_updated_at=? WHERE id=?",
+                (
+                    cognee_dataset_id,
+                    cognee_data_id,
+                    json.dumps(provenance_node_sets or [source_id]),
+                    _now(),
+                    source_id,
+                ),
+            )
+
+    def validate_collection_ids(self, vault: str, collection_ids: list[str]) -> None:
+        if len(collection_ids) > 10 or len(set(collection_ids)) != len(collection_ids):
+            raise CollectionValidationError(
+                "Eine Quelle erlaubt höchstens 10 eindeutige Collections"
+            )
+        if not collection_ids:
+            return
+        placeholders = ",".join("?" for _ in collection_ids)
+        rows = self.conn.execute(
+            "SELECT id FROM collections WHERE vault=? AND state='active' "
+            f"AND id IN ({placeholders})",
+            (vault, *collection_ids),
+        ).fetchall()
+        if {row[0] for row in rows} != set(collection_ids):
+            raise CollectionValidationError(
+                "Collections müssen aktiv sein und zum Vault der Quelle gehören"
+            )
+
+    def cognee_ids(self, source_id: str) -> tuple[str | None, str | None]:
+        row = self.conn.execute(
+            "SELECT cognee_dataset_id,cognee_data_id FROM sources WHERE id=?", (source_id,)
+        ).fetchone()
+        if row is None:
+            raise CollectionValidationError("Quelle existiert nicht")
+        return row[0], row[1]
+
+    def provenance_node_sets(self, source_id: str) -> list[str]:
+        row = self.conn.execute(
+            "SELECT cognee_provenance_node_sets FROM sources WHERE id=?", (source_id,)
+        ).fetchone()
+        if row is None:
+            raise CollectionValidationError("Quelle existiert nicht")
+        if not row[0]:
+            return [source_id]
+        values = json.loads(row[0])
+        return [value for value in values if isinstance(value, str)] or [source_id]
+
+    def set_cognee_ids(self, source_id: str, dataset_id: str | None, data_id: str | None) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE sources SET cognee_dataset_id=?,cognee_data_id=? WHERE id=?",
+                (dataset_id, data_id, source_id),
+            )
+
     def get_collection_sync(self, source_id: str) -> CollectionSync:
         row = self.conn.execute(
             "SELECT id,collection_revision,indexed_collection_revision,"
@@ -421,17 +518,7 @@ class SourceStore:
             if source is None:
                 raise CollectionValidationError("Quelle existiert nicht")
             vault, revision = source
-            if collection_ids:
-                placeholders = ",".join("?" for _ in collection_ids)
-                rows = self.conn.execute(
-                    f"SELECT id FROM collections WHERE vault=? AND state='active' "
-                    f"AND id IN ({placeholders})",
-                    (vault, *collection_ids),
-                ).fetchall()
-                if {row[0] for row in rows} != set(collection_ids):
-                    raise CollectionValidationError(
-                        "Collections müssen aktiv sein und zum Vault der Quelle gehören"
-                    )
+            self.validate_collection_ids(vault, collection_ids)
             new_revision = revision + 1
             self.conn.execute(
                 "DELETE FROM source_desired_collections WHERE source_id=?", (source_id,)
@@ -503,3 +590,15 @@ class SourceStore:
                 (_now(), event_id),
             )
         return cursor.rowcount == 1
+
+    def dispatch_reindex_events(self, queue: Any) -> int:
+        """Überträgt die Outbox idempotent in queue.db; Crash-Lücken bleiben retrybar."""
+        delivered = 0
+        for event in self.pending_reindex_events():
+            source = self.get(event.source_id)
+            if source is None:
+                continue
+            queue.enqueue_reindex(source.vault, event.source_id, event.revision)
+            if self.mark_reindex_event_delivered(event.id):
+                delivered += 1
+        return delivered

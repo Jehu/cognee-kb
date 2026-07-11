@@ -58,13 +58,69 @@ def load_instance_env(instance: Instance, env_path: Path | None = None) -> None:
     assert_instance_env(instance)
 
 
-async def ingest(instance: Instance, file_path: Path, dataset: str, node_sets: list[str]) -> None:
+def _ingest_ids(result: object) -> tuple[str | None, str | None]:
+    item = result[0] if isinstance(result, (list, tuple)) and result else result
+    if isinstance(item, dict):
+        return item.get("dataset_id"), item.get("id") or item.get("data_id")
+    return getattr(item, "dataset_id", None), getattr(item, "id", None) or getattr(
+        item, "data_id", None
+    )
+
+
+async def ingest(
+    instance: Instance, file_path: Path, dataset: str, node_sets: list[str]
+) -> tuple[str | None, str | None]:
     assert_instance_env(instance)
     import cognee  # lazy: erst nach load_instance_env importieren
 
     async with _COGNEE_LOCK:
-        await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
+        result = await cognee.add(str(file_path), dataset_name=dataset, node_set=node_sets or None)
         await cognee.cognify(datasets=[dataset])
+        dataset_id, data_id = _ingest_ids(result)
+        if not dataset_id or not data_id:
+            dataset_record = next(
+                (item for item in await cognee.datasets.list_datasets() if item.name == dataset),
+                None,
+            )
+            if dataset_record is not None:
+                data = await cognee.datasets.list_data(dataset_record.id)
+                provenance = node_sets[0] if node_sets else None
+                match = next(
+                    (
+                        item
+                        for item in reversed(data)
+                        if provenance is not None and provenance in (item.node_set or [])
+                    ),
+                    None,
+                )
+                if match is not None:
+                    dataset_id, data_id = str(dataset_record.id), str(match.id)
+    return dataset_id, data_id
+
+
+async def delete_source(
+    instance: Instance,
+    dataset_id: str,
+    data_id: str,
+    provenance_node_set: str | None = None,
+) -> None:
+    """Löscht alte und nach Teilfehlern verbliebene Daten einer Quelle."""
+    assert_instance_env(instance)
+    import cognee
+
+    async with _COGNEE_LOCK:
+        data = await cognee.datasets.list_data(dataset_id)
+        matches = [
+            item
+            for item in data
+            if str(item.id) == data_id
+            or (
+                provenance_node_set is not None
+                and provenance_node_set in (item.node_set or [])
+            )
+        ]
+        for item in matches:
+            await cognee.datasets.delete_data(dataset_id, item.id)
 
 
 async def query(instance: Instance, question: str, datasets: list[str]) -> str:

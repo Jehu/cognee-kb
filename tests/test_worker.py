@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
 from kb.config import Vault
 from kb.queue import JobQueue
-from kb.sources import SourceStore
+from kb.sources import SourceRecord, SourceStore
 from kb.worker import process_one, process_one_async, run_forever_async
 
 
@@ -243,3 +243,168 @@ async def test_failed_job_logs_job_id_vault_and_request_id(tmp_path, caplog):
     assert f"job={jid}" in msg
     assert "vault=privat" in msg
     assert "request_id=rid-9" in msg
+
+
+@pytest.mark.asyncio
+async def test_initial_ingest_projects_and_publishes_collection_membership(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    one = store.create_collection("privat", "Eins")
+    two = store.create_collection("privat", "Zwei")
+    jid = q.enqueue("privat", "snippet", {"text": "Inhalt", "collection_ids": [one.id, two.id]})
+    ingest_mock = AsyncMock(return_value=("dataset-1", "data-1"))
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
+        "kb.cognee_io.ingest", ingest_mock
+    ):
+        await process_one_async(None, q=q, store=store)
+
+    source_id = store.conn.execute("SELECT id FROM sources").fetchone()[0]
+    ingest_mock.assert_awaited_once_with(
+        None, ANY, "privat", node_sets=[source_id, one.node_set_key, two.node_set_key]
+    )
+    assert store.desired_collection_ids(source_id) == [one.id, two.id]
+    assert store.indexed_collection_ids(source_id) == [one.id, two.id]
+    assert store.get_collection_sync(source_id).collection_sync_status == "synced"
+    assert store.cognee_ids(source_id) == ("dataset-1", "data-1")
+    assert q.status(jid) == "done"
+
+
+@pytest.mark.asyncio
+async def test_reindex_failure_preserves_indexed_membership_and_stale_job_cannot_publish(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    old = store.create_collection("privat", "Alt")
+    new = store.create_collection("privat", "Neu")
+    raw = tmp_path / "raw.md"
+    raw.write_text("Inhalt")
+    source = SourceRecord.new(
+        type="snippet",
+        url=None,
+        video_id=None,
+        locator=None,
+        vault="privat",
+        raw_md_path=str(raw),
+    )
+    store.insert(source)
+    store.initialize_collections(source.id, [old.id], cognee_dataset_id="ds", cognee_data_id="data")
+    rev1 = store.replace_desired_collections(source.id, [new.id]).collection_revision
+    rev2 = store.replace_desired_collections(source.id, []).collection_revision
+    q.enqueue_reindex("privat", source.id, rev1)
+    delete_mock = AsyncMock(side_effect=RuntimeError("delete failed"))
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
+        "kb.cognee_io.delete_source", delete_mock
+    ):
+        await process_one_async(None, q=q, store=store)
+
+    assert store.indexed_collection_ids(source.id) == [old.id]
+    assert store.get_collection_sync(source.id).collection_revision == rev2
+    assert store.get_collection_sync(source.id).collection_sync_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_reindex_deletes_source_data_and_publishes_current_revision(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    collection = store.create_collection("privat", "Neu")
+    raw = tmp_path / "raw.md"
+    raw.write_text("Inhalt")
+    source = SourceRecord.new(
+        type="snippet", url=None, video_id=None, locator=None,
+        vault="privat", raw_md_path=str(raw)
+    )
+    store.insert(source)
+    store.initialize_collections(
+        source.id, [], cognee_dataset_id="ds-old", cognee_data_id="data-old"
+    )
+    revision = store.replace_desired_collections(source.id, [collection.id]).collection_revision
+    jid = q.enqueue_reindex("privat", source.id, revision)
+    delete_mock = AsyncMock()
+    ingest_mock = AsyncMock(return_value=("ds-new", "data-new"))
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
+        "kb.cognee_io.delete_source", delete_mock
+    ), patch("kb.cognee_io.ingest", ingest_mock):
+        await process_one_async(None, q=q, store=store)
+
+    delete_mock.assert_awaited_once_with(
+        None, "ds-old", "data-old", provenance_node_set=source.id
+    )
+    ingest_mock.assert_awaited_once_with(
+        None, raw, "privat", node_sets=[source.id, collection.node_set_key]
+    )
+    assert store.indexed_collection_ids(source.id) == [collection.id]
+    assert store.cognee_ids(source.id) == ("ds-new", "data-new")
+    assert store.get_collection_sync(source.id).collection_sync_status == "synced"
+    assert q.status(jid) == "done"
+
+
+@pytest.mark.asyncio
+async def test_failed_reindex_rolls_back_prior_index_projection(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    old = store.create_collection("privat", "Alt")
+    new = store.create_collection("privat", "Neu")
+    raw = tmp_path / "raw.md"
+    raw.write_text("Inhalt")
+    source = SourceRecord.new(
+        type="snippet", url=None, video_id=None, locator=None,
+        vault="privat", raw_md_path=str(raw)
+    )
+    store.insert(source)
+    store.initialize_collections(
+        source.id, [old.id], cognee_dataset_id="ds-old", cognee_data_id="data-old"
+    )
+    revision = store.replace_desired_collections(source.id, [new.id]).collection_revision
+    jid = q.enqueue_reindex("privat", source.id, revision)
+    ingest_mock = AsyncMock(
+        side_effect=[RuntimeError("cognify down"), ("ds-rollback", "data-rollback")]
+    )
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
+        "kb.cognee_io.delete_source", AsyncMock()
+    ), patch("kb.cognee_io.ingest", ingest_mock):
+        await process_one_async(None, q=q, store=store)
+
+    assert ingest_mock.await_args_list[0].kwargs["node_sets"] == [source.id, new.node_set_key]
+    assert ingest_mock.await_args_list[1].kwargs["node_sets"] == [source.id, old.node_set_key]
+    assert store.cognee_ids(source.id) == ("ds-rollback", "data-rollback")
+    assert store.indexed_collection_ids(source.id) == [old.id]
+    sync = store.get_collection_sync(source.id)
+    assert sync.indexed_collection_revision == 0
+    assert sync.collection_revision == revision
+    assert sync.collection_sync_status == "failed"
+    assert "cognify down" in sync.collection_sync_error
+    assert q.status(jid) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_reindex_records_primary_and_rollback_failure(tmp_path):
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    old = store.create_collection("privat", "Alt")
+    new = store.create_collection("privat", "Neu")
+    raw = tmp_path / "raw.md"
+    raw.write_text("Inhalt")
+    source = SourceRecord.new(
+        type="snippet", url=None, video_id=None, locator=None,
+        vault="privat", raw_md_path=str(raw)
+    )
+    store.insert(source)
+    store.initialize_collections(
+        source.id, [old.id], cognee_dataset_id="ds-old", cognee_data_id="data-old"
+    )
+    revision = store.replace_desired_collections(source.id, [new.id]).collection_revision
+    jid = q.enqueue_reindex("privat", source.id, revision)
+    ingest_mock = AsyncMock(
+        side_effect=[RuntimeError("primary cognify error"), RuntimeError("rollback error")]
+    )
+    with patch("kb.worker.get_vault", return_value=make_vault(tmp_path)), patch(
+        "kb.cognee_io.delete_source", AsyncMock()
+    ), patch("kb.cognee_io.ingest", ingest_mock):
+        await process_one_async(None, q=q, store=store)
+
+    sync = store.get_collection_sync(source.id)
+    assert sync.collection_sync_status == "failed"
+    assert "primary cognify error" in sync.collection_sync_error
+    assert "rollback error" in sync.collection_sync_error
+    assert store.indexed_collection_ids(source.id) == [old.id]
+    assert store.cognee_ids(source.id) == ("ds-old", "data-old")
+    assert q.status(jid) == "failed"

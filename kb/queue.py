@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     payload TEXT NOT NULL,        -- JSON
     status TEXT NOT NULL DEFAULT 'pending',
     error TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    idempotency_key TEXT UNIQUE
 );
 """
 
@@ -31,6 +32,16 @@ class JobQueue:
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        try:
+            self.conn.execute("ALTER TABLE jobs ADD COLUMN idempotency_key TEXT")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
+            "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         """Schließt die Connection (sauberer Shutdown des Instance Service)."""
@@ -44,6 +55,22 @@ class JobQueue:
         self.conn.commit()
         assert cur.lastrowid is not None  # INSERT → immer eine ID
         return cur.lastrowid
+
+    def enqueue_reindex(self, vault: str, source_id: str, revision: int) -> int:
+        """Erzeugt genau einen Reindex-Job je Source-Revision."""
+        key = f"collection-reindex:{source_id}:{revision}"
+        payload = json.dumps({"source_id": source_id, "revision": revision})
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO jobs(vault,kind,payload,idempotency_key) "
+                "VALUES(?,'collection_reindex',?,?)",
+                (vault, payload, key),
+            )
+            row = self.conn.execute(
+                "SELECT id FROM jobs WHERE idempotency_key=?", (key,)
+            ).fetchone()
+        assert row is not None
+        return row[0]
 
     def claim_next(self) -> Job | None:
         row = self.conn.execute(

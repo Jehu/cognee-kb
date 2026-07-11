@@ -42,6 +42,68 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
     raw_path = None
     try:
         vault = get_vault(job.vault)
+        if job.kind == "collection_reindex":
+            source_id = str(job.payload["source_id"])
+            revision = int(job.payload["revision"])
+            source = store.get(source_id)
+            if source is None or source.vault != vault.name:
+                raise ValueError("Quelle existiert nicht im Vault")
+            sync = store.get_collection_sync(source_id)
+            if sync.collection_revision != revision:
+                q.mark_done(job.id)
+                return True
+            dataset_id, data_id = store.cognee_ids(source_id)
+            if not dataset_id or not data_id:
+                raise RuntimeError("Cognee-IDs der Quelle fehlen")
+            desired_keys = store.collection_node_set_keys(source_id)
+            indexed_keys = store.collection_node_set_keys(source_id, desired=False)
+            provenance = store.provenance_node_sets(source_id)
+            await cognee_io.delete_source(
+                instance, dataset_id, data_id, provenance_node_set=provenance[0]
+            )
+            try:
+                ingest_result = await cognee_io.ingest(
+                    instance,
+                    Path(source.raw_md_path),
+                    vault.dataset,
+                    node_sets=[*provenance, *desired_keys],
+                )
+            except Exception as primary_error:
+                # Nach erfolgreichem Delete ist der bestätigte Index sonst nur
+                # noch in SQLite vorhanden. Best-effort die vorige Projektion
+                # wiederherstellen; der gewünschte Stand bleibt dennoch failed.
+                try:
+                    rollback_result = await cognee_io.ingest(
+                        instance,
+                        Path(source.raw_md_path),
+                        vault.dataset,
+                        node_sets=[*provenance, *indexed_keys],
+                    )
+                    if isinstance(rollback_result, tuple) and len(rollback_result) == 2:
+                        rollback_dataset_id, rollback_data_id = rollback_result
+                        store.set_cognee_ids(
+                            source_id,
+                            rollback_dataset_id or dataset_id,
+                            rollback_data_id or data_id,
+                        )
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        f"{type(primary_error).__name__}: {primary_error}; "
+                        f"rollback failed: {type(rollback_error).__name__}: {rollback_error}"
+                    ) from primary_error
+                raise
+            new_dataset_id, new_data_id = (
+                ingest_result
+                if isinstance(ingest_result, tuple) and len(ingest_result) == 2
+                else (None, None)
+            )
+            # Eine zwischenzeitlich neuere Revision darf diesen Stand nicht publizieren.
+            if store.complete_collection_reindex(source_id, revision):
+                store.set_cognee_ids(
+                    source_id, new_dataset_id or dataset_id, new_data_id or data_id
+                )
+            q.mark_done(job.id)
+            return True
         # _fetch ist blockierendes I/O (HTTP, Datei) — nicht den Loop blockieren
         doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
         # Dedup: identischer Body im selben Vault wird nicht erneut ingestet
@@ -75,12 +137,31 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
         # Stufe 1.5: node_set fällt per Default auf record.id zurück, damit jedes
         # Dokument eine deterministische belongs_to_set-Kante trägt (Vorbereitung
         # für späteren CYPHER-Herkunfts-Fallback). Ändert den Stufe-1-Pfad nicht.
+        collection_ids = job.payload.get("collection_ids", [])
+        store.validate_collection_ids(vault.name, collection_ids)
+        collection_keys = [
+            store.get_collection(vault.name, collection_id).node_set_key
+            for collection_id in collection_ids
+        ]
         node_set = job.payload.get("node_set") or record.id
-        await cognee_io.ingest(
+        provenance = node_set if isinstance(node_set, list) else [node_set]
+        ingest_result = await cognee_io.ingest(
             instance,
             path,
             vault.dataset,
-            node_sets=node_set if isinstance(node_set, list) else [node_set],
+            node_sets=[*provenance, *collection_keys],
+        )
+        dataset_id, data_id = (
+            ingest_result
+            if isinstance(ingest_result, tuple) and len(ingest_result) == 2
+            else (None, None)
+        )
+        store.initialize_collections(
+            record.id,
+            collection_ids,
+            cognee_dataset_id=dataset_id,
+            cognee_data_id=data_id,
+            provenance_node_sets=provenance,
         )
         q.mark_done(job.id)
     except Exception as e:  # noqa: BLE001 — Worker darf nie sterben
@@ -89,7 +170,11 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
         # Cleanup: Source-Record + Rohdatei wurden VOR cognee angelegt. Ohne
         # Cleanup würde der Dedup-Check (find_by_hash ohne Status-Filter) diesen
         # Inhalt beim nächsten Versuch überspringen — stummer Datenverlust.
-        if record_id is not None:
+        if job.kind == "collection_reindex":
+            source_id = str(job.payload.get("source_id", ""))
+            revision = int(job.payload.get("revision", -1))
+            store.fail_collection_reindex(source_id, revision, f"{type(e).__name__}: {e}")
+        elif record_id is not None:
             store.delete(record_id)
         if raw_path is not None:
             try:
@@ -128,6 +213,7 @@ def run_forever(
     setup_logging()
     cognee_io.load_instance_env(instance)
     q.recover_stale()  # genau ein Worker pro Instanz — verwaiste Jobs gefahrlos zurücksetzen
+    store.dispatch_reindex_events(q)
     # EIN Loop für alle Jobs — cognee cachet loop-gebundene Ressourcen
     # (siehe _answer_all in cli.py), frischer Loop pro Job riskiert
     # 'attached to a different loop'-Fehler.
@@ -153,5 +239,6 @@ async def run_forever_async(
     """
     setup_logging()
     while True:
+        store.dispatch_reindex_events(q)
         if not await process_one_async(instance, q, store):
             await asyncio.sleep(poll_seconds)

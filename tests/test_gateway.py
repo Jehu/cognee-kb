@@ -558,3 +558,38 @@ def test_source_collection_view_rejects_cross_vault_source(client, tmp_path, mon
         "/api/sources/business-mwe/foreign-source/collections", headers=AUTH
     )
     assert response.status_code == 404
+
+
+def test_reassign_source_collections_commits_outbox_and_dispatches_once(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    store = SourceStore(tmp_path / "cloud_sources.db")
+    store.insert(_src("source-1", "business-mwe", "Quelle"))
+    collection = store.create_collection("business-mwe", "Projekt")
+
+    response = client.put(
+        "/api/sources/business-mwe/source-1/collections",
+        headers=AUTH,
+        json={"collection_ids": [collection.id]},
+    )
+    assert response.status_code == 202
+    assert response.json()["collection_revision"] == 1
+    assert store.desired_collection_ids("source-1") == [collection.id]
+    assert store.pending_reindex_events() == []
+    queue = JobQueue(tmp_path / "cloud.db")
+    job = queue.claim_next()
+    assert job.kind == "collection_reindex"
+    assert job.payload == {"source_id": "source-1", "revision": 1}
+    assert store.dispatch_reindex_events(queue) == 0
+
+
+def test_ingest_rejects_invalid_collection_before_enqueue(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    response = client.post(
+        "/api/ingest",
+        headers=AUTH,
+        json={"vault": "business-mwe", "content": "Text", "collection_ids": ["unknown"]},
+    )
+    assert response.status_code == 422
+    assert JobQueue(tmp_path / "cloud.db").counts()["pending"] == 0
