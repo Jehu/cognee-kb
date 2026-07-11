@@ -29,12 +29,33 @@ async def proxy_query(
     lesbarem Text. Optional wird eine X-Request-ID mitgegeben (Korrelation
     Gateway → Instance /query → Logs).
     """
+    return await _proxy(instance_name, "query", question, datasets, request_id, "answer")
+
+
+async def proxy_search(
+    instance_name: str,
+    question: str,
+    datasets: list[str],
+    request_id: str | None = None,
+) -> dict[str, object]:
+    """Liefert die Retrieval-Antwort des Instance Service ohne Answer-Pflicht."""
+    return await _proxy(instance_name, "search", question, datasets, request_id, "evidence")
+
+
+async def _proxy(
+    instance_name: str,
+    operation: str,
+    question: str,
+    datasets: list[str],
+    request_id: str | None,
+    required_key: str,
+) -> dict[str, object]:
     inst = get_instance(instance_name)
     headers = {"X-Request-ID": request_id} if request_id else {}
     try:
         async with httpx.AsyncClient(timeout=QUERY_TIMEOUT) as client:
             r = await client.post(
-                f"http://127.0.0.1:{inst.port}/query",
+                f"http://127.0.0.1:{inst.port}/{operation}",
                 json={"question": question, "datasets": datasets},
                 headers=headers,
             )
@@ -51,6 +72,13 @@ async def proxy_query(
         raise QueryProxyError(
             f"Instance Service lieferte keine JSON-Antwort: {r.text[:200]}"
         ) from None
-    if not isinstance(data, dict) or not data.get("answer"):
+    if not isinstance(data, dict):
         raise QueryProxyError(f"Instance Service lieferte keine Antwort: {data}")
+    if required_key == "answer":
+        has_answer = isinstance(data.get("answer"), str) and bool(data["answer"])
+        has_gap_response = "answer" in data and isinstance(data.get("gaps"), list)
+        if not has_answer and not has_gap_response:
+            raise QueryProxyError(f"Instance Service lieferte keine Antwort: {data}")
+    if required_key == "evidence" and not isinstance(data.get(required_key), list):
+        raise QueryProxyError(f"Instance Service lieferte keine Evidenz: {data}")
     return data

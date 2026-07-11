@@ -24,7 +24,7 @@ class _FakeResponse:
     status_code = 200
 
     def json(self):
-        return {"answer": "42"}
+        return {"answer": "42", "citations": [], "gaps": []}
 
 
 def _fake_async_client(response=None, exc=None, calls=None):
@@ -233,7 +233,12 @@ def test_query_proxies_to_instance(client, monkeypatch):
         "/api/query", headers=AUTH, json={"vault": "business-mwe", "question": "Was ist X?"}
     )
     assert r.status_code == 200
-    assert r.json() == {"vault": "business-mwe", "answer": "42", "sources": []}
+    assert r.json() == {
+        "vault": "business-mwe",
+        "answer": "42",
+        "citations": [],
+        "gaps": [],
+    }
     # Richtige Instanz (cloud → 8802) + Dataset des Vaults
     url, payload = calls[0]
     assert url == "http://127.0.0.1:8802/query"
@@ -261,6 +266,27 @@ def test_query_read_error_returns_502(client, monkeypatch):
 def test_query_unknown_vault(client):
     r = client.post("/api/query", headers=AUTH, json={"vault": "geheim", "question": "x"})
     assert r.status_code == 404
+
+
+def test_search_proxies_retrieval_without_answer(client, monkeypatch):
+    async def fake_proxy(instance, question, datasets, request_id=None):
+        assert instance == "cloud"
+        assert datasets == ["business-mwe"]
+        return {
+            "answer": None,
+            "evidence": [{"evidence_id": "e1", "rank": 1}],
+            "sources": [],
+        }
+
+    monkeypatch.setattr("kb.gateway.proxy_search", fake_proxy)
+    r = client.post(
+        "/api/search",
+        headers=AUTH,
+        json={"vault": "business-mwe", "question": "Belege?"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["evidence"] == [{"evidence_id": "e1", "rank": 1}]
 
 
 # --- Raw-Source-Endpoint ---

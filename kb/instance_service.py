@@ -13,11 +13,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header
 from pydantic import BaseModel
 
-from kb import cognee_io, guard, worker
+from kb import cognee_io, guard, query_service, worker
 from kb.config import get_instance
 from kb.logging_setup import setup_logging
 from kb.queue import JobQueue
-from kb.sources import SourceStore
+from kb.sources import SourceRecord, SourceStore
 
 logger = logging.getLogger("kb.instance")
 
@@ -25,6 +25,28 @@ logger = logging.getLogger("kb.instance")
 class QueryBody(BaseModel):
     question: str
     datasets: list[str]
+
+
+def _source_payload(record: SourceRecord) -> dict[str, object]:
+    return {
+        "source_id": record.id,
+        "type": record.type,
+        "url": record.url,
+        "locator": record.locator,
+        "raw_md_path": record.raw_md_path,
+        "title": record.title,
+    }
+
+
+def _resolve_sources(
+    store: SourceStore, source_ids: set[str], allowed_vaults: set[str]
+) -> list[dict[str, object]]:
+    sources = []
+    for source_id in source_ids:
+        record = store.get(source_id)
+        if record is not None and record.vault in allowed_vaults:
+            sources.append(_source_payload(record))
+    return sources
 
 
 def _log_worker_death(task: asyncio.Task[None]) -> None:
@@ -88,25 +110,32 @@ def create_app(instance_name: str) -> FastAPI:
             body.datasets,
             x_request_id,
         )
-        answer, source_ids = await cognee_io.query_with_sources(
-            app.state.inst, body.question, datasets=body.datasets
+        result = await query_service.answer(
+            app.state.inst,
+            body.question,
+            datasets=body.datasets,
+            store=app.state.store,
         )
-        sources = []
-        for sid in source_ids:
-            rec = app.state.store.get(sid)
-            if rec is None:
-                continue
-            sources.append(
-                {
-                    "source_id": rec.id,
-                    "type": rec.type,
-                    "url": rec.url,
-                    "locator": rec.locator,
-                    "raw_md_path": rec.raw_md_path,
-                    "title": rec.title,
-                }
-            )
-        return {"answer": answer, "sources": sources}
+        source_ids = {sid for citation in result.citations for sid in citation.source_ids}
+        sources = _resolve_sources(app.state.store, source_ids, set(body.datasets))
+        return {**result.model_dump(), "sources": sources}
+
+    @app.post("/search")
+    async def search(
+        body: QueryBody, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
+    ) -> dict[str, object]:
+        logger.info(
+            "search instance=%s datasets=%s request_id=%s",
+            instance_name,
+            body.datasets,
+            x_request_id,
+        )
+        result = await query_service.search(
+            app.state.inst, body.question, datasets=body.datasets, store=app.state.store
+        )
+        source_ids = {sid for item in result.evidence for sid in item.source_ids}
+        sources = _resolve_sources(app.state.store, source_ids, set(body.datasets))
+        return {**result.model_dump(), "sources": sources}
 
     @app.get("/health")
     async def health() -> dict[str, object]:

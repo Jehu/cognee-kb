@@ -35,6 +35,15 @@ test('chat page renders dynamic messages with readable bubble styles', async () 
   assert.match(html, /msg-role/);
 });
 
+test('chat page renders citations and knowledge gaps accessibly', async () => {
+  const html = await source('src/pages/chat.astro');
+  assert.match(html, /citation-list/);
+  assert.match(html, /gap-list/);
+  assert.match(html, /role = 'status'/);
+  assert.match(html, /citations: r\.citations/);
+  assert.match(html, /gaps: r\.gaps/);
+});
+
 test('settings page can show token, diagnostics, and save', async () => {
   const html = await source('src/pages/settings.astro');
   assert.match(html, /id="token"/);

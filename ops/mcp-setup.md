@@ -16,7 +16,8 @@ uv run kb serve-instance local     # bzw. cloud — muss laufen, bevor der MCP n
 
 | Tool | Was es tut |
 |---|---|
-| `search_privat(question)` | Frage an den Vault `privat` (GRAPH_COMPLETION). |
+| `search_privat(question)` | Evidenzgebundene Antwort aus dem Vault `privat`. |
+| `retrieve_privat(question)` | Gerankte Evidenz ohne Antwort-Synthese. |
 | `ingest(vault, content, node_set?)` | Inhalt (URL/Text/YouTube) in die Queue eines Instanz-Vaults legen. |
 | `job_status(vault, job_id)` | Status/Fehler eines Queue-Jobs nachschlagen. |
 
@@ -26,7 +27,10 @@ uv run kb serve-instance local     # bzw. cloud — muss laufen, bevor der MCP n
 |---|---|
 | `search_business_ki(question)` | Frage an den Vault `business-ki`. |
 | `search_business_mwe(question)` | Frage an den Vault `business-mwe`. |
-| `search_all(question)` | Frage über alle Business-Vaults gleichzeitig (ACL-scoped). |
+| `search_all(question)` | Frage über alle Business-Vaults dieser Wall. |
+| `retrieve_business_ki(question)` | Gerankte Evidenz aus `business-ki` ohne Synthese. |
+| `retrieve_business_mwe(question)` | Gerankte Evidenz aus `business-mwe` ohne Synthese. |
+| `retrieve_all(question)` | Gerankte Evidenz aus allen Business-Vaults ohne Synthese. |
 | `ingest(vault, content, node_set?)` | Inhalt in die Queue eines Business-Vaults legen. |
 | `job_status(vault, job_id)` | Status/Fehler eines Queue-Jobs nachschlagen. |
 
@@ -109,6 +113,8 @@ In einer laufenden Claude-Code-Session zeigt das interaktive Panel `/mcp` die
 verbundenen Server und ihre Tools an (interaktiver Slash-Befehl — nur in der
 Session aufrufbar, nicht skriptbar).
 
-Funktionstest: ein search-Tool aufrufen (z. B. `search_business_ki` mit einer
-Testfrage). Voraussetzung bleibt der laufende Instance Service der Instanz —
-ohne ihn meldet das Tool „Instance Service nicht erreichbar".
+Funktionstest: zuerst ein `retrieve_*`-Tool und danach das entsprechende
+`search_*`-Tool mit derselben Testfrage aufrufen. Das erste liefert Evidenz ohne
+Synthese, das zweite eine evidenzgebundene Antwort. Voraussetzung bleibt der
+laufende Instance Service der Instanz — ohne ihn meldet das Tool „Instance
+Service nicht erreichbar".

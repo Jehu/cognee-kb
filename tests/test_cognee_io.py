@@ -10,8 +10,12 @@ from kb.cognee_io import (
     _render,
     load_instance_env,
     query_with_sources,
+    retrieve,
+    synthesize_evidence,
 )
 from kb.config import get_instance
+from kb.query_models import EvidenceChunk
+from kb.synthesis import SynthesisClaim, SynthesisResponse
 
 
 def test_load_instance_env_sets_vars(tmp_path, monkeypatch):
@@ -125,6 +129,52 @@ def test_extract_source_ids_deduplicates_same_source():
 def test_extract_source_ids_no_source_id():
     results = [{"text": "Kein Frontmatter hier, nur plain text."}]
     assert _extract_source_ids(results) == []
+
+
+def test_retrieve_returns_ranked_evidence_without_graph_completion(monkeypatch):
+    calls = []
+
+    class _SearchType:
+        CHUNKS = "chunks"
+
+    async def search(**kwargs):
+        calls.append(kwargs)
+        return [{"text": _FM}, {"text": "Zweiter Beleg"}]
+
+    fake_cognee = SimpleNamespace(search=search, SearchType=_SearchType)
+    monkeypatch.setitem(sys.modules, "cognee", fake_cognee)
+    monkeypatch.setattr("kb.cognee_io.assert_instance_env", lambda instance: None)
+
+    evidence = asyncio.run(retrieve(get_instance("local"), "Frage?", ["privat"]))
+
+    assert [(item.evidence_id, item.rank) for item in evidence] == [("e1", 1), ("e2", 2)]
+    assert evidence[0].source_ids == [_UUID]
+    assert evidence[1].source_ids == []
+    assert calls == [{"query_type": "chunks", "query_text": "Frage?", "datasets": ["privat"]}]
+
+
+def test_synthesize_evidence_uses_numbered_chunks_and_guard(monkeypatch):
+    captured = {}
+
+    async def fake_structured(text_input, system_prompt, response_model):
+        captured["text_input"] = text_input
+        captured["response_model"] = response_model
+        return SynthesisResponse(claims=[SynthesisClaim(text="A", evidence_ids=["e1"])])
+
+    guard_call = []
+    monkeypatch.setattr("kb.cognee_io._call_structured_output", fake_structured)
+    monkeypatch.setattr("kb.cognee_io._apply_cognee_workarounds", lambda: None)
+    monkeypatch.setattr(
+        "kb.cognee_io.assert_instance_env", lambda instance: guard_call.append(instance)
+    )
+    evidence = [EvidenceChunk(evidence_id="e1", rank=1, text="Beleg", source_ids=[])]
+
+    response = asyncio.run(synthesize_evidence(get_instance("local"), "Frage?", evidence))
+
+    assert response.claims[0].evidence_ids == ["e1"]
+    assert "[e1]" in captured["text_input"]
+    assert captured["response_model"] is SynthesisResponse
+    assert guard_call == [get_instance("local")]
 
 
 def test_query_with_sources_returns_only_best_related_source(monkeypatch):

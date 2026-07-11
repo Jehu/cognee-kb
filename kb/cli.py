@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import hashlib
+import json
 import os
 import re
 import signal
@@ -12,12 +13,13 @@ from pathlib import Path
 
 import typer
 
-from kb import cognee_io
+from kb import cognee_io, query_service
 from kb.classify import build_payload
 from kb.config import (
     GATEWAY_PORT,
     INSTANCES,
     ROOT,
+    VAULTS,
     Instance,
     UnknownVaultError,
     Vault,
@@ -27,6 +29,8 @@ from kb.config import (
     sources_path,
 )
 from kb.envutil import strip_quotes
+from kb.maintenance import audit_instance
+from kb.maintenance import repair as repair_maintenance
 from kb.queue import JobQueue
 from kb.sources import SourceStore
 
@@ -51,10 +55,76 @@ def add(vault: str, path: Path) -> None:
 
 @app.command()
 def query(vault: str, question: str) -> None:
-    """Stellt eine Frage an einen Vault (GRAPH_COMPLETION)."""
+    """Stellt eine evidenzgebundene Frage an einen Vault."""
     v, inst = _load(vault)
-    answer = asyncio.run(cognee_io.query(inst, question, datasets=[v.dataset]))
-    typer.echo(answer)
+    store = SourceStore(sources_path(v.instance))
+    try:
+        result = asyncio.run(
+            query_service.answer(inst, question, datasets=[v.dataset], store=store)
+        )
+    finally:
+        store.close()
+    typer.echo(result.answer or "Keine belegte Antwort möglich.")
+
+
+@app.command()
+def search(vault: str, question: str) -> None:
+    """Liefert gerankte Evidenz aus einem Vault, ohne Antwort-Synthese."""
+    v, inst = _load(vault)
+    evidence = asyncio.run(cognee_io.retrieve(inst, question, datasets=[v.dataset]))
+    if not evidence:
+        typer.echo("Keine Evidenz gefunden.")
+        return
+    for item in evidence:
+        typer.echo(f"[{item.rank}] {item.evidence_id} sources={','.join(item.source_ids) or '-'}")
+        typer.echo(item.text)
+
+
+@app.command("diagnose-query")
+def diagnose_query(
+    vault: str,
+    question: str,
+    show_content: bool = typer.Option(False, help="Chunk-Inhalte in der Diagnose anzeigen."),
+) -> None:
+    """Zeigt Retrieval-Ränge, Quellenauflösung und Laufzeiten; Inhalte standardmäßig redigiert."""
+    v, inst = _load(vault)
+    store = SourceStore(sources_path(v.instance))
+    try:
+        result = asyncio.run(
+            query_service.search(inst, question, datasets=[v.dataset], store=store)
+        )
+    finally:
+        store.close()
+    typer.echo(
+        json.dumps(
+            query_service.diagnostic_payload(result, show_content=show_content),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@app.command()
+def maintain(
+    instance: str,
+    apply_repair: str | None = typer.Option(
+        None, "--apply", help="Eine Reparaturklasse anwenden: stale-jobs oder orphan-temp."
+    ),
+) -> None:
+    """Prüft Quellen, Rohschicht und Queue; ohne --apply garantiert read-only."""
+    inst = get_instance(instance)
+    vaults = [vault for vault in VAULTS.values() if vault.instance == instance]
+    findings = audit_instance(inst, vaults)
+    for finding in findings:
+        typer.echo(f"{finding.kind}\t{finding.subject}\t{finding.detail}")
+    if not findings:
+        typer.echo("Keine Auffälligkeiten.")
+    if apply_repair:
+        try:
+            changed = repair_maintenance(inst, vaults, apply_repair, findings=findings)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--apply") from None
+        typer.echo(f"Repariert: {changed}")
 
 
 async def _answer_all(inst: Instance, fragen: list[str], datasets: list[str]) -> list[str]:

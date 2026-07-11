@@ -9,13 +9,14 @@ Startwege (primär: CLI):
   * `KB_MCP_INSTANCE=<instance> python -m kb.mcp_server`  ← für .mcp.json direkt
 """
 
+import json
 import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from kb.classify import build_payload
 from kb.config import VAULTS, get_instance, queue_path
-from kb.query_proxy import QueryProxyError, proxy_query
+from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
 from kb.queue import JobQueue
 
 if TYPE_CHECKING:
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 def _tool_name(vault_name: str) -> str:
     # MCP-Tool-Namen: Bindestriche → Unterstrich (business-ki → search_business_ki).
     return "search_" + vault_name.replace("-", "_")
+
+
+def _retrieval_tool_name(vault_name: str) -> str:
+    return "retrieve_" + vault_name.replace("-", "_")
 
 
 def build_server(instance_name: str) -> "FastMCP":
@@ -58,6 +63,22 @@ def build_server(instance_name: str) -> "FastMCP":
             description=f"Frage an den Vault '{v.name}' (GRAPH_COMPLETION).",
         )
 
+        def make_retrieve(dataset: str) -> Callable[[str], Awaitable[str]]:
+            async def retrieve(question: str) -> str:
+                try:
+                    data = await proxy_search(instance_name, question, [dataset])
+                except QueryProxyError as e:
+                    return str(e)
+                return json.dumps(data, ensure_ascii=False, indent=2)
+
+            return retrieve
+
+        mcp.add_tool(
+            make_retrieve(v.dataset),
+            name=_retrieval_tool_name(v.name),
+            description=f"Ruft gerankte Evidenz aus dem Vault '{v.name}' ab (ohne Synthese).",
+        )
+
     # --- search_all nur bei >1 Vault ---
     if len(vaults) > 1:
         all_datasets = [v.dataset for v in vaults]
@@ -71,6 +92,20 @@ def build_server(instance_name: str) -> "FastMCP":
             name="search_all",
             description="Frage über alle Vaults dieser Instanz "
             f"({', '.join(sorted(vault_names))}).",
+        )
+
+        async def retrieve_all(question: str) -> str:
+            """Gerankte Evidenz aus allen Vaults dieser Instanz."""
+            try:
+                data = await proxy_search(instance_name, question, all_datasets)
+            except QueryProxyError as e:
+                return str(e)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        mcp.add_tool(
+            retrieve_all,
+            name="retrieve_all",
+            description="Ruft gerankte Evidenz aus allen Vaults dieser Instanz ab (ohne Synthese).",
         )
 
     # --- ingest ---

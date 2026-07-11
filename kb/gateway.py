@@ -28,7 +28,7 @@ from kb.config import (
     sources_path,
 )
 from kb.logging_setup import setup_logging
-from kb.query_proxy import QueryProxyError, proxy_query
+from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
 from kb.queue import JobQueue
 from kb.sources import SourceStore
 
@@ -128,7 +128,18 @@ def create_app() -> FastAPI:
             )
         except QueryProxyError as e:
             raise HTTPException(502, str(e)) from None
-        return {"vault": v.name, "answer": data["answer"], "sources": data.get("sources", [])}
+        return {"vault": v.name, **data}
+
+    @api.post("/search")
+    async def search(request: Request, body: QueryBody) -> dict[str, object]:
+        v = _resolve_vault(body.vault)
+        try:
+            data = await proxy_search(
+                v.instance, body.question, [v.dataset], request_id=request.state.request_id
+            )
+        except QueryProxyError as e:
+            raise HTTPException(502, str(e)) from None
+        return {"vault": v.name, **data}
 
     @api.get("/source/{vault}/{source_id}/raw")
     def source_raw(vault: str, source_id: str) -> FileResponse:

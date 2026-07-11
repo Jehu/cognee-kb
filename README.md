@@ -29,8 +29,17 @@ make test                  # beides zusammen
 uv run kb ingest <vault> <url-oder-text-oder-datei>   # in Queue legen
 uv run kb import <vault> <dir-oder-datei>             # .md/.txt-Bestand migrieren (--exclude, --only-newer-than, --limit, --dry-run)
 uv run kb worker <instance>                           # Queue abarbeiten (local | cloud)
-uv run kb query <vault> "Frage"                       # GRAPH_COMPLETION
+uv run kb query <vault> "Frage"                       # evidenzgebundene Antwort
+uv run kb search <vault> "Frage"                      # gerankte Chunks, keine Synthese
+uv run kb diagnose-query <vault> "Frage"              # Retrieval-Diagnose (Inhalte redigiert)
+uv run kb maintain <instance>                         # read-only Bestands-Audit
 ```
+
+`diagnose-query --show-content` zeigt zusätzlich die gefundenen Chunk-Inhalte.
+`maintain` schreibt ohne `--apply` nichts. Erlaubte Reparaturen sind ausschließlich
+`--apply stale-jobs` und `--apply orphan-temp`; Re-Index, Quellenlöschung und
+Metadatenumschreibung bleiben gesperrt. Mit `KB_STALE_DAYS` kann die Schwelle für
+den Hinweis auf veraltete Evidenz geändert werden (Default: 180 Tage).
 
 ## Phase 2 — Gateway + PWA
 
@@ -57,8 +66,10 @@ Gateway-, Instanz- und Authentifizierungsstatus. Vault-Auswahlen zeigen die
 zugehörige Wall (`local`/`cloud`) gruppiert und im Optionstext an.
 Der Ingest-Screen ist als schneller Capture-Flow aufgebaut (Metadaten einklappbar,
 Node-Set-Autosuggest aus bestehenden Jobs, Job-Fortschritt sichtbar); der Chat
-zeigt im leeren Zustand Beispiel-Fragen und als verwandte Quelle nur den besten
-Chunk-Treffer zur Frage. Die Einstellungen bieten Token-Anzeige sowie einen
+zeigt im leeren Zustand Beispiel-Fragen. Antworten werden aus den zuvor
+gefundenen Chunks synthetisiert, tragen validierte Evidenz-Referenzen und zeigen
+deterministisch erkannte Wissenslücken (z. B. keine, nicht auflösbare oder
+veraltete Evidenz). Die Einstellungen bieten Token-Anzeige sowie einen
 Verbindungstest.
 
 Starten (ein Befehl, idempotent):
@@ -118,9 +129,10 @@ offiziellen `cognee-mcp`: Letzterer öffnet eine eigene Kuzu-RW-Instanz, und Kuz
 ist strikt single-writer — neben dem laufenden Instance Service führt das zum
 Lock-Crash oder zu divergierenden Daten. Der eigene Server bleibt cognee-frei,
 proxyt Queries per httpx an den Instance Service und schreibt Ingest direkt in
-die Queue. Tools werden dynamisch aus den Vaults der Instanz registriert
-(local: `search_privat`; cloud: `search_allgemein`, `search_business_ki`,
-`search_business_mwe`, `search_all`; je `ingest` + `job_status`).
+die Queue. Die bestehenden `search_<vault>`-Tools liefern weiterhin Antworten;
+`retrieve_<vault>` liefert gerankte Evidenz ohne Synthese. Instanzen mit mehreren
+Vaults erhalten zusätzlich `search_all` und `retrieve_all`; jede Instanz bietet
+außerdem `ingest` und `job_status`.
 
 ```sh
 uv run kb serve-mcp local     # bzw. cloud — Instance Service muss laufen
@@ -129,6 +141,26 @@ uv run kb serve-mcp local     # bzw. cloud — Instance Service muss laufen
 Registrierung in Claude Code (project-scope, Isolations-Regeln, Verifikation):
 siehe `ops/mcp-setup.md`. Kopiervorlagen: `ops/mcp/local.mcp.json` und
 `ops/mcp/cloud.mcp.json`.
+
+## Query-Datenfluss und Quellenqualität
+
+`kb query` und `POST /api/query` verwenden einen Evidence-first-Datenfluss:
+
+1. Cognee `CHUNKS` liefert gerankte Evidenz innerhalb der gewählten Wall.
+2. Die Chunks erhalten lokale Evidenz-IDs (`e1`, `e2`, ...).
+3. Das für die Wall erlaubte LLM synthetisiert ausschließlich aus diesen Chunks
+   und ordnet Aussagen Evidenz-IDs zu.
+4. `kb` verwirft unbekannte IDs, löst Quellen nur im angefragten Vault auf und
+   ergänzt maschinenlesbare `citations` und `gaps`.
+
+`POST /api/search` und `kb search` stoppen nach Schritt 1 und verursachen keine
+Antwort-Synthese. Die bisherigen Response-Felder `answer` und `sources` bleiben
+erhalten; `evidence`, `citations`, `gaps` und `trace` sind additive Felder.
+
+Quellenrevisionen sind noch nicht aktiviert: Cognee 0.3.x löscht beim Update die
+alte Quelle vor `add` und `cognify` und bietet über diesen Ablauf kein atomisches
+Rollback. Der verifizierte Stand und die Bedingungen für eine spätere Umsetzung
+stehen in `docs/cognee-source-lifecycle.md`.
 
 ## Phase 4 — Docker (Deployment)
 

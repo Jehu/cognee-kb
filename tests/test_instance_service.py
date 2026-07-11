@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from kb import cognee_io, guard, instance_service, worker
+from kb import cognee_io, guard, instance_service, query_service, worker
 from kb.config import Instance
 from kb.guard import EnvGuardError
+from kb.query_models import Citation, EvidenceChunk, QueryResult
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
@@ -74,20 +75,68 @@ def test_health_reports_dead_worker(inst, monkeypatch, capsys):
 # --- /query ---
 
 
-def test_query_calls_cognee_io(inst, monkeypatch):
-    query_mock = AsyncMock(return_value=("Antwort!", []))
-    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
+def test_search_returns_ranked_evidence_without_answer(inst, monkeypatch):
+    retrieve_mock = AsyncMock(
+        return_value=[
+            EvidenceChunk(evidence_id="e1", rank=1, text="Beleg", source_ids=["unbekannt"])
+        ]
+    )
+    monkeypatch.setattr(cognee_io, "retrieve", retrieve_mock)
+
     with TestClient(instance_service.create_app("local")) as client:
+        r = client.post("/search", json={"question": "Was ist X?", "datasets": ["privat"]})
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "answer": None,
+        "evidence": [
+            {
+                "evidence_id": "e1",
+                "rank": 1,
+                "text": "Beleg",
+                "source_ids": [],
+            }
+        ],
+        "citations": [],
+        "gaps": [
+            {
+                "kind": "unresolved_source",
+                "detail": "Quellen-ID nicht im angefragten Vault auflösbar: unbekannt",
+            }
+        ],
+        "trace": {
+            "retrieval_ms": r.json()["trace"]["retrieval_ms"],
+            "synthesis_ms": None,
+            "warnings": [],
+        },
+        "sources": [],
+    }
+    retrieve_mock.assert_awaited_once_with(inst, "Was ist X?", datasets=["privat"])
+
+
+def test_query_calls_cognee_io(inst, monkeypatch):
+    query_mock = AsyncMock(return_value=QueryResult(answer="Antwort!"))
+    monkeypatch.setattr(query_service, "answer", query_mock)
+    app = instance_service.create_app("local")
+    with TestClient(app) as client:
         r = client.post("/query", json={"question": "Was ist X?", "datasets": ["privat"]})
     assert r.status_code == 200
-    assert r.json() == {"answer": "Antwort!", "sources": []}
-    query_mock.assert_awaited_once_with(inst, "Was ist X?", datasets=["privat"])
+    assert r.json()["answer"] == "Antwort!"
+    assert r.json()["citations"] == []
+    query_mock.assert_awaited_once_with(
+        inst, "Was ist X?", datasets=["privat"], store=app.state.store
+    )
 
 
 def test_query_returns_sources(inst, tmp_path, monkeypatch):
     # source_ids enthalten "sid1" — ein passender Record liegt in der Store-DB.
-    query_mock = AsyncMock(return_value=("A", ["sid1"]))
-    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
+    query_mock = AsyncMock(
+        return_value=QueryResult(
+            answer="A",
+            citations=[Citation(claim_index=0, evidence_ids=["e1"], source_ids=["sid1"])],
+        )
+    )
+    monkeypatch.setattr(query_service, "answer", query_mock)
 
     rec = SourceRecord(
         id="sid1",
@@ -125,12 +174,46 @@ def test_query_returns_sources(inst, tmp_path, monkeypatch):
 
 def test_query_skips_unknown_source_ids(inst, monkeypatch):
     # source_id ohne passenden DB-Record → wird übersprungen, kein Crash.
-    query_mock = AsyncMock(return_value=("B", ["unbekannt"]))
-    monkeypatch.setattr(cognee_io, "query_with_sources", query_mock)
+    query_mock = AsyncMock(
+        return_value=QueryResult(
+            answer="B",
+            citations=[Citation(claim_index=0, evidence_ids=["e1"], source_ids=["unbekannt"])],
+        )
+    )
+    monkeypatch.setattr(query_service, "answer", query_mock)
     with TestClient(instance_service.create_app("local")) as client:
         r = client.post("/query", json={"question": "?", "datasets": ["privat"]})
     assert r.status_code == 200
-    assert r.json() == {"answer": "B", "sources": []}
+    assert r.json()["answer"] == "B"
+    assert r.json()["sources"] == []
+
+
+def test_query_does_not_resolve_source_from_other_vault(inst, tmp_path, monkeypatch):
+    query_mock = AsyncMock(
+        return_value=QueryResult(
+            answer="B",
+            citations=[Citation(claim_index=0, evidence_ids=["e1"], source_ids=["foreign"])],
+        )
+    )
+    monkeypatch.setattr(query_service, "answer", query_mock)
+    SourceStore(tmp_path / "sources.db").insert(
+        SourceRecord(
+            id="foreign",
+            type="snippet",
+            url=None,
+            video_id=None,
+            locator=None,
+            fetched_at="2026-01-01T00:00:00Z",
+            vault="business-ki",
+            raw_md_path="raw/business-ki/x.md",
+            title="Fremd",
+        )
+    )
+
+    with TestClient(instance_service.create_app("local")) as client:
+        r = client.post("/query", json={"question": "?", "datasets": ["privat"]})
+
+    assert r.json()["sources"] == []
 
 
 # --- Lifespan ---

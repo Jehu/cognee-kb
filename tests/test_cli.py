@@ -4,10 +4,82 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from kb.cli import _is_excluded, _parse_cutoff, app
+from kb.query_models import EvidenceChunk
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
 runner = CliRunner()
+
+
+def test_search_prints_ranked_evidence_without_answer(monkeypatch):
+    async def fake_retrieve(instance, question, datasets):
+        return [EvidenceChunk(evidence_id="e1", rank=1, text="Beleg", source_ids=["sid1"])]
+
+    monkeypatch.setattr("kb.cli.cognee_io.load_instance_env", lambda inst: None)
+    monkeypatch.setattr("kb.cli.cognee_io.retrieve", fake_retrieve)
+
+    result = runner.invoke(app, ["search", "privat", "Belege?"])
+
+    assert result.exit_code == 0
+    assert "[1] e1" in result.output
+    assert "Beleg" in result.output
+
+
+def test_query_uses_evidence_grounded_query_service(monkeypatch, tmp_path):
+    from kb.query_models import QueryResult
+
+    async def fake_answer(instance, question, datasets, store):
+        return QueryResult(answer="Belegte Antwort")
+
+    monkeypatch.setattr("kb.cli.cognee_io.load_instance_env", lambda inst: None)
+    monkeypatch.setattr("kb.cli.query_service.answer", fake_answer)
+    monkeypatch.setattr("kb.cli.sources_path", lambda instance: tmp_path / "sources.db")
+
+    result = runner.invoke(app, ["query", "privat", "Frage?"])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == "Belegte Antwort"
+
+
+def test_diagnose_query_redacts_evidence_content(monkeypatch, tmp_path):
+    from kb.query_models import QueryResult, QueryTrace
+
+    async def fake_search(instance, question, datasets, store):
+        return QueryResult(
+            evidence=[
+                EvidenceChunk(evidence_id="e1", rank=1, text="Privater Inhalt", source_ids=["sid1"])
+            ],
+            trace=QueryTrace(retrieval_ms=1.0),
+        )
+
+    monkeypatch.setattr("kb.cli.cognee_io.load_instance_env", lambda inst: None)
+    monkeypatch.setattr("kb.cli.query_service.search", fake_search)
+    monkeypatch.setattr("kb.cli.sources_path", lambda instance: tmp_path / "sources.db")
+
+    result = runner.invoke(app, ["diagnose-query", "privat", "Belege?"])
+
+    assert result.exit_code == 0
+    assert "Privater Inhalt" not in result.output
+    assert '"evidence_id": "e1"' in result.output
+
+
+def test_maintain_defaults_to_read_only(monkeypatch):
+    from kb.maintenance import MaintenanceFinding
+
+    monkeypatch.setattr(
+        "kb.cli.audit_instance",
+        lambda inst, vaults: [MaintenanceFinding("missing_raw", "sid1", "fehlt")],
+    )
+    repair_calls = []
+    monkeypatch.setattr(
+        "kb.cli.repair_maintenance", lambda *args, **kwargs: repair_calls.append(args)
+    )
+
+    result = runner.invoke(app, ["maintain", "local"])
+
+    assert result.exit_code == 0
+    assert "missing_raw" in result.output
+    assert repair_calls == []
 
 
 def _patch_io(monkeypatch, tmp_path):

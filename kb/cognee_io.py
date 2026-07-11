@@ -20,6 +20,8 @@ from pathlib import Path
 from kb.config import Instance
 from kb.envutil import strip_quotes
 from kb.guard import assert_instance_env
+from kb.query_models import EvidenceChunk
+from kb.synthesis import SynthesisResponse
 
 logger = logging.getLogger("kb.cognee_io")
 
@@ -207,6 +209,67 @@ def _extract_source_ids(results: Iterable[object]) -> list[str]:
             for match in _SOURCE_ID_RE.finditer(text):
                 seen[match.group(1)] = None
     return list(seen.keys())
+
+
+async def retrieve(instance: Instance, question: str, datasets: list[str]) -> list[EvidenceChunk]:
+    """Liefert gerankte CHUNKS, ohne eine Antwort vom LLM zu erzeugen."""
+    assert_instance_env(instance)
+    import cognee
+    from cognee import SearchType
+
+    _apply_cognee_workarounds()
+
+    async with _COGNEE_LOCK:
+        results = await cognee.search(
+            query_type=SearchType.CHUNKS,
+            query_text=question,
+            datasets=datasets,
+        )
+
+    evidence = []
+    for rank, result in enumerate(results, start=1):
+        strings = list(dict.fromkeys(_iter_strings(result)))
+        evidence.append(
+            EvidenceChunk(
+                evidence_id=f"e{rank}",
+                rank=rank,
+                text="\n".join(strings),
+                source_ids=_extract_source_ids([result]),
+            )
+        )
+    return evidence
+
+
+async def _call_structured_output(
+    text_input: str, system_prompt: str, response_model: type[SynthesisResponse]
+) -> SynthesisResponse:
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+    result = await LLMGateway.acreate_structured_output(
+        text_input=text_input,
+        system_prompt=system_prompt,
+        response_model=response_model,
+    )
+    return SynthesisResponse.model_validate(result)
+
+
+async def synthesize_evidence(
+    instance: Instance,
+    question: str,
+    evidence: list[EvidenceChunk],
+) -> SynthesisResponse:
+    """Synthetisiert ausschließlich aus nummerierter, bereits gefundener Evidenz."""
+    assert_instance_env(instance)
+    _apply_cognee_workarounds()
+    blocks = "\n\n".join(f"[{item.evidence_id}]\n{item.text}" for item in evidence)
+    prompt = f"Frage:\n{question}\n\nEvidenz:\n{blocks}"
+    system_prompt = (
+        "Beantworte die Frage ausschließlich aus der gelieferten Evidenz. "
+        "Zerlege die Antwort in claims und verweise pro Claim nur auf IDs in eckigen Klammern. "
+        "Wenn die Evidenz nicht reicht, erfinde nichts und liefere entsprechend weniger Claims."
+    )
+    async with _COGNEE_LOCK:
+        return await _call_structured_output(prompt, system_prompt, SynthesisResponse)
 
 
 async def query_with_sources(

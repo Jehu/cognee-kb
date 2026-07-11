@@ -78,7 +78,33 @@ import Base from '../layouts/Base.astro';
         const role = document.createElement('div'); role.className = 'msg-role';
         role.textContent = m.role === 'user' ? 'Du' : 'KB ' + m.vault;
         const bub = document.createElement('div'); bub.className = 'msg-bubble msg-body';
-        bub.innerHTML = m.role === 'user' ? escape(m.text) : md(m.text);
+        bub.innerHTML = m.role === 'user' ? escape(m.text) : md(m.text || 'Keine belegte Antwort möglich.');
+
+        if (m.role === 'kb' && m.citations?.length) {
+          const citations = document.createElement('ol');
+          citations.className = 'citation-list';
+          citations.setAttribute('aria-label', 'Belege nach Aussage');
+          for (const citation of m.citations) {
+            const item = document.createElement('li');
+            item.textContent = `Aussage ${citation.claim_index + 1}: ${citation.evidence_ids.join(', ')}`;
+            citations.appendChild(item);
+          }
+          bub.appendChild(citations);
+        }
+
+        if (m.role === 'kb' && m.gaps?.length) {
+          const gaps = document.createElement('div');
+          gaps.className = 'gap-list status';
+          gaps.role = 'status';
+          const heading = document.createElement('strong'); heading.textContent = 'Wissenslücken';
+          const list = document.createElement('ul');
+          for (const gap of m.gaps) {
+            const item = document.createElement('li'); item.textContent = gap.detail;
+            list.appendChild(item);
+          }
+          gaps.append(heading, list);
+          bub.appendChild(gaps);
+        }
 
         if (m.role === 'kb' && m.sources?.length) {
           const sec = document.createElement('div'); sec.className = 'sources';
@@ -113,7 +139,10 @@ import Base from '../layouts/Base.astro';
       const { api } = await import('../lib/api.js');
       try {
         const r = await api('/api/query', { method: 'POST', body: JSON.stringify({ vault, question: q }) });
-        hist.push({ role: 'kb', text: r.answer, sources: r.sources || [], vault: r.vault || vault });
+        hist.push({
+          role: 'kb', text: r.answer, sources: r.sources || [], citations: r.citations || [],
+          gaps: r.gaps || [], vault: r.vault || vault
+        });
         render();
       } catch (e) {
         errEl.textContent = e.message; errEl.classList.remove('hidden');

@@ -41,11 +41,26 @@ def test_tools_registered_from_instance_vaults():
     for inst_name in INSTANCES:
         inst_vaults = _vaults_of(inst_name)
         names = _tool_names(mcp_server.build_server(inst_name))
-        expected = {mcp_server._tool_name(v.name) for v in inst_vaults} | {"ingest", "job_status"}
+        expected = (
+            {mcp_server._tool_name(v.name) for v in inst_vaults}
+            | {mcp_server._retrieval_tool_name(v.name) for v in inst_vaults}
+            | {"ingest", "job_status"}
+        )
         if len(inst_vaults) > 1:
             expected.add("search_all")
+            expected.add("retrieve_all")
         assert names == expected, inst_name
         assert ("search_all" in names) == (len(inst_vaults) > 1)
+
+
+def test_retrieval_tool_returns_evidence_json(monkeypatch):
+    async def fake_search(instance_name, question, datasets, request_id=None):
+        return {"answer": None, "evidence": [{"evidence_id": "e1", "rank": 1}]}
+
+    monkeypatch.setattr(mcp_server, "proxy_search", fake_search)
+    server = mcp_server.build_server("local")
+    result = asyncio.run(_call(server, "retrieve_privat", question="Belege?"))
+    assert '"evidence_id": "e1"' in result
 
 
 # --- Ingest ---

@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from kb import query_proxy
-from kb.query_proxy import QueryProxyError, proxy_query
+from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
 
 
 def _client(response=None, exc=None):
@@ -49,6 +49,18 @@ def test_success_returns_dict(monkeypatch):
     assert data == {"answer": "42", "sources": []}
 
 
+def test_search_accepts_evidence_without_answer(monkeypatch):
+    monkeypatch.setattr(
+        query_proxy.httpx,
+        "AsyncClient",
+        _client(response=_Resp(payload={"answer": None, "evidence": [{"rank": 1}]})),
+    )
+
+    data = asyncio.run(proxy_search("cloud", "Q?", ["business-mwe"]))
+
+    assert data["evidence"] == [{"rank": 1}]
+
+
 def test_transport_error_raises(monkeypatch):
     monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _client(exc=httpx.ConnectError("zu")))
     with pytest.raises(QueryProxyError, match="nicht erreichbar"):
@@ -75,6 +87,19 @@ def test_missing_answer_raises(monkeypatch):
     )
     with pytest.raises(QueryProxyError, match="keine Antwort"):
         asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
+
+
+def test_structured_gap_response_may_have_no_answer(monkeypatch):
+    payload = {
+        "answer": None,
+        "evidence": [{"evidence_id": "e1"}],
+        "gaps": [{"kind": "evidence_unavailable", "detail": "LLM down"}],
+    }
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _client(response=_Resp(payload=payload)))
+
+    data = asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"]))
+
+    assert data == payload
 
 
 def test_forwards_request_id_header(monkeypatch):
