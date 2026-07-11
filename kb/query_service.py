@@ -7,17 +7,28 @@ from kb import cognee_io
 from kb.config import Instance
 from kb.gap_analysis import analyze_gaps
 from kb.query_models import EvidenceChunk, GapSignal, QueryResult, QueryTrace
-from kb.sources import SourceStore
+from kb.sources import CollectionValidationError, SourceStore
 from kb.synthesis import SynthesisResponse, compose_result
 
 
+class QueryScopeError(ValueError):
+    """Der angefragte Collection-Scope ist ungültig."""
+
+
 async def search(
-    instance: Instance, question: str, datasets: list[str], store: SourceStore
+    instance: Instance,
+    question: str,
+    datasets: list[str],
+    store: SourceStore,
+    collection_ids: list[str] | None = None,
 ) -> QueryResult:
     """Führt ausschließlich Retrieval aus; `store` markiert die Vertrauensgrenze."""
     started = perf_counter()
-    evidence = await cognee_io.retrieve(instance, question, datasets=datasets)
-    evidence, source_gaps = _filter_evidence_sources(evidence, store, set(datasets))
+    node_names, allowed_ids = _resolve_scope(store, datasets, collection_ids)
+    evidence = await cognee_io.retrieve(
+        instance, question, datasets=datasets, node_names=node_names or None, top_k=100
+    )
+    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids)
     result = QueryResult(
         answer=None,
         evidence=evidence,
@@ -28,12 +39,19 @@ async def search(
 
 
 async def answer(
-    instance: Instance, question: str, datasets: list[str], store: SourceStore
+    instance: Instance,
+    question: str,
+    datasets: list[str],
+    store: SourceStore,
+    collection_ids: list[str] | None = None,
 ) -> QueryResult:
     """Retrieval zuerst, danach genau eine Synthese aus diesen Belegen."""
     retrieval_started = perf_counter()
+    node_names, allowed_ids = _resolve_scope(store, datasets, collection_ids)
     try:
-        evidence = await cognee_io.retrieve(instance, question, datasets=datasets)
+        evidence = await cognee_io.retrieve(
+            instance, question, datasets=datasets, node_names=node_names or None, top_k=100
+        )
     except Exception as exc:  # noqa: BLE001 — Teilfehler wird als Gap transportiert
         return QueryResult(
             gaps=[
@@ -43,7 +61,7 @@ async def answer(
                 )
             ]
         )
-    evidence, source_gaps = _filter_evidence_sources(evidence, store, set(datasets))
+    evidence, source_gaps = _filter_evidence_sources(evidence, allowed_ids)
     if not evidence:
         return compose_result(response=SynthesisResponse(), evidence=[])
     retrieval_ms = (perf_counter() - retrieval_started) * 1000
@@ -76,25 +94,42 @@ async def answer(
 
 
 def _filter_evidence_sources(
-    evidence: list[EvidenceChunk], store: SourceStore, allowed_vaults: set[str]
+    evidence: list[EvidenceChunk], allowed_source_ids: set[str]
 ) -> tuple[list[EvidenceChunk], list[GapSignal]]:
     filtered = []
     gaps = []
     for item in evidence:
-        allowed_ids = []
         for source_id in item.source_ids:
-            record = store.get(source_id)
-            if record is not None and record.vault in allowed_vaults:
-                allowed_ids.append(source_id)
-            else:
+            if source_id not in allowed_source_ids:
                 gaps.append(
                     GapSignal(
                         kind="unresolved_source",
                         detail=f"Quellen-ID nicht im angefragten Vault auflösbar: {source_id}",
                     )
                 )
-        filtered.append(item.model_copy(update={"source_ids": allowed_ids}))
+        if item.source_ids and all(
+            source_id in allowed_source_ids for source_id in item.source_ids
+        ):
+            filtered.append(item.model_copy(update={"rank": len(filtered) + 1}))
     return filtered, gaps
+
+
+def _resolve_scope(
+    store: SourceStore, datasets: list[str], collection_ids: list[str] | None
+) -> tuple[list[str], set[str]]:
+    if collection_ids:
+        if len(datasets) != 1:
+            raise QueryScopeError("Collection-Suche erfordert genau einen Vault")
+        try:
+            return store.retrieval_scope(datasets[0], collection_ids)
+        except CollectionValidationError as exc:
+            raise QueryScopeError(str(exc)) from None
+
+    allowed_source_ids: set[str] = set()
+    for vault in datasets:
+        _, vault_source_ids = store.retrieval_scope(vault, None)
+        allowed_source_ids.update(vault_source_ids)
+    return [], allowed_source_ids
 
 
 def _stale_days() -> int:

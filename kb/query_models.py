@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvidenceChunk(BaseModel):
@@ -33,6 +33,19 @@ class QueryTrace(BaseModel):
     retrieval_ms: float | None = None
     synthesis_ms: float | None = None
     warnings: list[str] = Field(default_factory=list)
+
+
+class QueryRequest(BaseModel):
+    question: str
+    datasets: list[str]
+    collection_ids: list[str] | None = Field(default=None, max_length=10)
+
+    @field_validator("collection_ids")
+    @classmethod
+    def _unique_collection_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("collection_ids müssen eindeutig sein")
+        return value
 
 
 class QueryResult(BaseModel):

@@ -89,14 +89,7 @@ def test_search_returns_ranked_evidence_without_answer(inst, monkeypatch):
     assert r.status_code == 200
     assert r.json() == {
         "answer": None,
-        "evidence": [
-            {
-                "evidence_id": "e1",
-                "rank": 1,
-                "text": "Beleg",
-                "source_ids": [],
-            }
-        ],
+        "evidence": [],
         "citations": [],
         "gaps": [
             {
@@ -111,7 +104,21 @@ def test_search_returns_ranked_evidence_without_answer(inst, monkeypatch):
         },
         "sources": [],
     }
-    retrieve_mock.assert_awaited_once_with(inst, "Was ist X?", datasets=["privat"])
+    retrieve_mock.assert_awaited_once_with(
+        inst, "Was ist X?", datasets=["privat"], node_names=None, top_k=100
+    )
+
+
+def test_search_rejects_invalid_collection_before_retrieval(inst, monkeypatch):
+    retrieve_mock = AsyncMock()
+    monkeypatch.setattr(cognee_io, "retrieve", retrieve_mock)
+    with TestClient(instance_service.create_app("local")) as client:
+        response = client.post(
+            "/search",
+            json={"question": "?", "datasets": ["privat"], "collection_ids": ["missing"]},
+        )
+    assert response.status_code == 422
+    retrieve_mock.assert_not_awaited()
 
 
 def test_query_calls_cognee_io(inst, monkeypatch):

@@ -16,12 +16,17 @@ QUERY_TIMEOUT = 120.0  # GRAPH_COMPLETION kann dauern
 class QueryProxyError(RuntimeError):
     """Konnte keine Antwort vom Instance Service erhalten."""
 
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 async def proxy_query(
     instance_name: str,
     question: str,
     datasets: list[str],
     request_id: str | None = None,
+    collection_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Liefert die geparste JSON-Antwort des Instance Service (mit 'answer').
 
@@ -29,7 +34,9 @@ async def proxy_query(
     lesbarem Text. Optional wird eine X-Request-ID mitgegeben (Korrelation
     Gateway → Instance /query → Logs).
     """
-    return await _proxy(instance_name, "query", question, datasets, request_id, "answer")
+    return await _proxy(
+        instance_name, "query", question, datasets, request_id, "answer", collection_ids
+    )
 
 
 async def proxy_search(
@@ -37,9 +44,12 @@ async def proxy_search(
     question: str,
     datasets: list[str],
     request_id: str | None = None,
+    collection_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Liefert die Retrieval-Antwort des Instance Service ohne Answer-Pflicht."""
-    return await _proxy(instance_name, "search", question, datasets, request_id, "evidence")
+    return await _proxy(
+        instance_name, "search", question, datasets, request_id, "evidence", collection_ids
+    )
 
 
 async def _proxy(
@@ -49,14 +59,18 @@ async def _proxy(
     datasets: list[str],
     request_id: str | None,
     required_key: str,
+    collection_ids: list[str] | None,
 ) -> dict[str, object]:
     inst = get_instance(instance_name)
     headers = {"X-Request-ID": request_id} if request_id else {}
     try:
         async with httpx.AsyncClient(timeout=QUERY_TIMEOUT) as client:
+            payload: dict[str, object] = {"question": question, "datasets": datasets}
+            if collection_ids is not None:
+                payload["collection_ids"] = collection_ids
             r = await client.post(
                 f"http://127.0.0.1:{inst.port}/{operation}",
-                json={"question": question, "datasets": datasets},
+                json=payload,
                 headers=headers,
             )
     except httpx.TransportError:
@@ -65,6 +79,15 @@ async def _proxy(
             f"läuft `kb serve-instance {inst.name}`?"
         ) from None
     if r.status_code != 200:
+        if 400 <= r.status_code < 500:
+            try:
+                detail = r.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            raise QueryProxyError(
+                detail or f"Instance Service '{inst.name}' antwortete mit {r.status_code}",
+                r.status_code,
+            )
         raise QueryProxyError(f"Instance Service '{inst.name}' antwortete mit {r.status_code}")
     try:
         data = r.json()

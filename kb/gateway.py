@@ -75,6 +75,14 @@ class IngestBody(BaseModel):
 class QueryBody(BaseModel):
     vault: str
     question: str
+    collection_ids: list[str] | None = Field(default=None, max_length=10)
+
+    @field_validator("collection_ids")
+    @classmethod
+    def _unique_collection_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("collection_ids müssen eindeutig sein")
+        return value
 
 
 class CollectionLabelBody(BaseModel):
@@ -176,22 +184,24 @@ def create_app() -> FastAPI:
     async def query(request: Request, body: QueryBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         try:
-            data = await proxy_query(
-                v.instance, body.question, [v.dataset], request_id=request.state.request_id
-            )
+            kwargs = {"request_id": request.state.request_id}
+            if body.collection_ids is not None:
+                kwargs["collection_ids"] = body.collection_ids
+            data = await proxy_query(v.instance, body.question, [v.dataset], **kwargs)
         except QueryProxyError as e:
-            raise HTTPException(502, str(e)) from None
+            raise HTTPException(e.status_code, str(e)) from None
         return {"vault": v.name, **data}
 
     @api.post("/search")
     async def search(request: Request, body: QueryBody) -> dict[str, object]:
         v = _resolve_vault(body.vault)
         try:
-            data = await proxy_search(
-                v.instance, body.question, [v.dataset], request_id=request.state.request_id
-            )
+            kwargs = {"request_id": request.state.request_id}
+            if body.collection_ids is not None:
+                kwargs["collection_ids"] = body.collection_ids
+            data = await proxy_search(v.instance, body.question, [v.dataset], **kwargs)
         except QueryProxyError as e:
-            raise HTTPException(502, str(e)) from None
+            raise HTTPException(e.status_code, str(e)) from None
         return {"vault": v.name, **data}
 
     @api.get("/source/{vault}/{source_id}/raw")

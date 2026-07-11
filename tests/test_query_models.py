@@ -1,4 +1,19 @@
-from kb.query_models import Citation, EvidenceChunk, GapSignal, QueryResult, QueryTrace
+from kb.query_models import (
+    Citation,
+    EvidenceChunk,
+    GapSignal,
+    QueryRequest,
+    QueryResult,
+    QueryTrace,
+)
+
+
+def test_query_request_preserves_collection_scope_semantics() -> None:
+    assert QueryRequest(question="?", datasets=["privat"]).collection_ids is None
+    assert QueryRequest(question="?", datasets=["privat"], collection_ids=[]).collection_ids == []
+    assert QueryRequest(
+        question="?", datasets=["privat"], collection_ids=["c1", "c2"]
+    ).collection_ids == ["c1", "c2"]
 
 
 def test_query_result_serializes_structured_evidence() -> None:

@@ -10,21 +10,16 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException
 
 from kb import cognee_io, guard, query_service, worker
 from kb.config import get_instance
 from kb.logging_setup import setup_logging
+from kb.query_models import QueryRequest
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
 logger = logging.getLogger("kb.instance")
-
-
-class QueryBody(BaseModel):
-    question: str
-    datasets: list[str]
 
 
 def _source_payload(record: SourceRecord) -> dict[str, object]:
@@ -103,7 +98,7 @@ def create_app(instance_name: str) -> FastAPI:
 
     @app.post("/query")
     async def query(
-        body: QueryBody, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
+        body: QueryRequest, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
     ) -> dict[str, object]:
         logger.info(
             "query instance=%s datasets=%s request_id=%s",
@@ -111,19 +106,20 @@ def create_app(instance_name: str) -> FastAPI:
             body.datasets,
             x_request_id,
         )
-        result = await query_service.answer(
-            app.state.inst,
-            body.question,
-            datasets=body.datasets,
-            store=app.state.store,
-        )
+        try:
+            kwargs = {"datasets": body.datasets, "store": app.state.store}
+            if body.collection_ids is not None:
+                kwargs["collection_ids"] = body.collection_ids
+            result = await query_service.answer(app.state.inst, body.question, **kwargs)
+        except query_service.QueryScopeError as exc:
+            raise HTTPException(422, str(exc)) from None
         source_ids = {sid for citation in result.citations for sid in citation.source_ids}
         sources = _resolve_sources(app.state.store, source_ids, set(body.datasets))
         return {**result.model_dump(), "sources": sources}
 
     @app.post("/search")
     async def search(
-        body: QueryBody, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
+        body: QueryRequest, x_request_id: str | None = Header(default=None, alias="X-Request-ID")
     ) -> dict[str, object]:
         logger.info(
             "search instance=%s datasets=%s request_id=%s",
@@ -131,9 +127,13 @@ def create_app(instance_name: str) -> FastAPI:
             body.datasets,
             x_request_id,
         )
-        result = await query_service.search(
-            app.state.inst, body.question, datasets=body.datasets, store=app.state.store
-        )
+        try:
+            kwargs = {"datasets": body.datasets, "store": app.state.store}
+            if body.collection_ids is not None:
+                kwargs["collection_ids"] = body.collection_ids
+            result = await query_service.search(app.state.inst, body.question, **kwargs)
+        except query_service.QueryScopeError as exc:
+            raise HTTPException(422, str(exc)) from None
         source_ids = {sid for item in result.evidence for sid in item.source_ids}
         sources = _resolve_sources(app.state.store, source_ids, set(body.datasets))
         return {**result.model_dump(), "sources": sources}

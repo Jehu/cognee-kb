@@ -114,10 +114,7 @@ async def delete_source(
             item
             for item in data
             if str(item.id) == data_id
-            or (
-                provenance_node_set is not None
-                and provenance_node_set in (item.node_set or [])
-            )
+            or (provenance_node_set is not None and provenance_node_set in (item.node_set or []))
         ]
         for item in matches:
             await cognee.datasets.delete_data(dataset_id, item.id)
@@ -207,12 +204,12 @@ async def retrieve(
         "query_type": SearchType.CHUNKS,
         "query_text": question,
         "datasets": datasets,
+        "top_k": min(max(top_k, 1), 100),
     }
     if node_names:
         search_kwargs.update(
             node_name=node_names,
             node_name_filter_operator="OR",
-            top_k=min(max(top_k, 1), 100),
         )
     async with _COGNEE_LOCK:
         results = await cognee.search(**search_kwargs)

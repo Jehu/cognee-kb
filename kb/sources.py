@@ -466,6 +466,31 @@ class SourceStore:
                 "Collections müssen aktiv sein und zum Vault der Quelle gehören"
             )
 
+    def retrieval_scope(
+        self, vault: str, collection_ids: list[str] | None
+    ) -> tuple[list[str], set[str]]:
+        """Löst Query-Collections atomar in NodeSets und sichere Quellen auf."""
+        if collection_ids:
+            self.validate_collection_ids(vault, collection_ids)
+            placeholders = ",".join("?" for _ in collection_ids)
+            collections = self.conn.execute(
+                "SELECT id,node_set_key FROM collections WHERE vault=? AND state='active' "
+                f"AND id IN ({placeholders})",
+                (vault, *collection_ids),
+            ).fetchall()
+            keys = {row[0]: row[1] for row in collections}
+            rows = self.conn.execute(
+                "SELECT DISTINCT s.id FROM sources s "
+                "JOIN source_indexed_collections i ON i.source_id=s.id "
+                "JOIN source_desired_collections d ON d.source_id=s.id "
+                "AND d.collection_id=i.collection_id "
+                f"WHERE s.vault=? AND i.collection_id IN ({placeholders})",
+                (vault, *collection_ids),
+            ).fetchall()
+            return [keys[cid] for cid in collection_ids], {row[0] for row in rows}
+        rows = self.conn.execute("SELECT id FROM sources WHERE vault=?", (vault,)).fetchall()
+        return [], {row[0] for row in rows}
+
     def cognee_ids(self, source_id: str) -> tuple[str | None, str | None]:
         row = self.conn.execute(
             "SELECT cognee_dataset_id,cognee_data_id FROM sources WHERE id=?", (source_id,)

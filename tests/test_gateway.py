@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kb import gateway
+from kb.query_proxy import QueryProxyError
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
 
@@ -245,6 +246,34 @@ def test_query_proxies_to_instance(client, monkeypatch):
     assert payload == {"question": "Was ist X?", "datasets": ["business-mwe"]}
 
 
+def test_query_forwards_collection_scope(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        gateway.httpx, "AsyncClient", _fake_async_client(response=_FakeResponse(), calls=calls)
+    )
+    response = client.post(
+        "/api/query",
+        headers=AUTH,
+        json={"vault": "business-mwe", "question": "?", "collection_ids": ["c1"]},
+    )
+    assert response.status_code == 200
+    assert calls[0][1]["collection_ids"] == ["c1"]
+
+
+def test_query_preserves_instance_validation_status(client, monkeypatch):
+    async def reject(*args, **kwargs):
+        raise QueryProxyError("Unbekannte Collection", status_code=422)
+
+    monkeypatch.setattr(gateway, "proxy_query", reject)
+    response = client.post(
+        "/api/query",
+        headers=AUTH,
+        json={"vault": "business-mwe", "question": "?", "collection_ids": ["bad"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Unbekannte Collection"
+
+
 def test_query_instance_down_returns_502(client, monkeypatch):
     monkeypatch.setattr(
         gateway.httpx, "AsyncClient", _fake_async_client(exc=httpx.ConnectError("zu"))
@@ -433,9 +462,7 @@ def test_sources_unknown_vault(client):
 # --- Collections ---
 
 
-def test_collection_lifecycle_is_vault_scoped_and_hides_internal_key(
-    client, tmp_path, monkeypatch
-):
+def test_collection_lifecycle_is_vault_scoped_and_hides_internal_key(client, tmp_path, monkeypatch):
     monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
 
     created = client.post(
@@ -462,21 +489,20 @@ def test_collection_lifecycle_is_vault_scoped_and_hides_internal_key(
     assert renamed.json()["id"] == collection_id
     assert renamed.json()["label"] == "Projekt B"
 
-    archived = client.post(
-        f"/api/collections/business-mwe/{collection_id}/archive", headers=AUTH
-    )
+    archived = client.post(f"/api/collections/business-mwe/{collection_id}/archive", headers=AUTH)
     assert archived.status_code == 200
     assert archived.json()["state"] == "archived"
     assert client.get("/api/collections/business-mwe", headers=AUTH).json()["collections"] == []
-    assert len(
-        client.get(
-            "/api/collections/business-mwe?include_archived=true", headers=AUTH
-        ).json()["collections"]
-    ) == 1
-
-    restored = client.post(
-        f"/api/collections/business-mwe/{collection_id}/restore", headers=AUTH
+    assert (
+        len(
+            client.get("/api/collections/business-mwe?include_archived=true", headers=AUTH).json()[
+                "collections"
+            ]
+        )
+        == 1
     )
+
+    restored = client.post(f"/api/collections/business-mwe/{collection_id}/restore", headers=AUTH)
     assert restored.status_code == 200
     assert restored.json()["state"] == "active"
 
@@ -486,13 +512,9 @@ def test_collection_contract_requires_auth_and_known_vault(client):
     assert client.get("/api/collections/unbekannt", headers=AUTH).status_code == 404
 
 
-def test_collection_validation_conflict_and_cross_vault_rejection(
-    client, tmp_path, monkeypatch
-):
+def test_collection_validation_conflict_and_cross_vault_rejection(client, tmp_path, monkeypatch):
     monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
-    first = client.post(
-        "/api/collections/business-mwe", headers=AUTH, json={"label": "Straße"}
-    )
+    first = client.post("/api/collections/business-mwe", headers=AUTH, json={"label": "Straße"})
     assert first.status_code == 201
     duplicate = client.post(
         "/api/collections/business-mwe", headers=AUTH, json={"label": " STRASSE "}
@@ -502,9 +524,7 @@ def test_collection_validation_conflict_and_cross_vault_rejection(
         "/api/collections/business-mwe", headers=AUTH, json={"label": "bad\u0007label"}
     )
     assert invalid.status_code == 422
-    too_long = client.post(
-        "/api/collections/business-mwe", headers=AUTH, json={"label": "x" * 65}
-    )
+    too_long = client.post("/api/collections/business-mwe", headers=AUTH, json={"label": "x" * 65})
     assert too_long.status_code == 422
 
     collection_id = first.json()["id"]
@@ -554,9 +574,7 @@ def test_source_collection_view_rejects_cross_vault_source(client, tmp_path, mon
     monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
     store = SourceStore(tmp_path / "cloud_sources.db")
     store.insert(_src("foreign-source", "business-ki", "Fremd"))
-    response = client.get(
-        "/api/sources/business-mwe/foreign-source/collections", headers=AUTH
-    )
+    response = client.get("/api/sources/business-mwe/foreign-source/collections", headers=AUTH)
     assert response.status_code == 404
 
 

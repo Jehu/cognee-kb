@@ -123,3 +123,37 @@ def test_forwards_request_id_header(monkeypatch):
     monkeypatch.setattr(query_proxy.httpx, "AsyncClient", _CapturingClient)
     asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"], request_id="abc-123"))
     assert sent["headers"] == {"X-Request-ID": "abc-123"}
+
+
+def test_forwards_nonempty_collection_scope(monkeypatch):
+    sent = {}
+
+    class Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *e):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            sent["json"] = json
+            return _Resp(payload={"answer": "x"})
+
+    monkeypatch.setattr(query_proxy.httpx, "AsyncClient", Client)
+    asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"], collection_ids=["c1"]))
+    assert sent["json"]["collection_ids"] == ["c1"]
+
+
+def test_preserves_upstream_validation_error(monkeypatch):
+    monkeypatch.setattr(
+        query_proxy.httpx,
+        "AsyncClient",
+        _client(response=_Resp(status_code=422, payload={"detail": "Unbekannte Collection"})),
+    )
+    with pytest.raises(QueryProxyError) as caught:
+        asyncio.run(proxy_query("cloud", "Q?", ["business-mwe"], collection_ids=["bad"]))
+    assert caught.value.status_code == 422
+    assert str(caught.value) == "Unbekannte Collection"
