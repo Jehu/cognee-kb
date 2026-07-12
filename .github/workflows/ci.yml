@@ -7,8 +7,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install uv
       - run: uv sync
@@ -19,7 +19,7 @@ jobs:
       # CVE-2025-69872 (diskcache) wird geduldet, solange es upstream keine
       # gefixte Version gibt; es kommt transitiv ueber Cognee.
       - run: uv run --with pip-audit pip-audit --ignore-vuln CVE-2025-68481 --ignore-vuln CVE-2025-69872
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: "22" }
       - run: npm install
         working-directory: web
@@ -29,8 +29,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install uv
       - run: uv sync
@@ -40,13 +40,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install uv
       - run: uv sync
       - run: uv run pytest
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: "22" }
       - run: npm install
         working-directory: web
