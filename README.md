@@ -43,13 +43,17 @@ Status prüfen:
 uv run kb status
 ```
 
-Die PWA wird vom Gateway auf Port `8800` ausgeliefert. Beim ersten Aufruf den `KB_API_TOKEN` aus `.env.gateway` in den Einstellungen hinterlegen.
+Die PWA wird vom Gateway auf Port `8800` ausgeliefert. Beim ersten Aufruf den `KB_API_TOKEN` aus `.env.gateway` in den Einstellungen hinterlegen. Danach lassen sich im Capture-Screen URLs, Notizen oder einzelne `.pdf`-/`.md`-/`.txt`-Dateien bis 20 MiB erfassen.
 
 ## Wissen erfassen
 
 ### Über die PWA
 
 Der Capture-Screen nimmt URLs, Text und unterstützte Quellen entgegen. Quellen können dabei bis zu zehn Vault-eigenen **Sammlungen** zugeordnet werden; neue Sammlungen lassen sich direkt im Auswahlfeld anlegen. Der Fortschritt des Queue-Jobs wird direkt angezeigt. Auf der Quellen-Seite lassen sich Sammlungen als Filter kombinieren und Zuordnungen bearbeiten. Änderungen werden quellbezogen im Hintergrund neu indexiert; die Oberfläche zeigt den Synchronisationsstand und bietet bei Fehlern einen erneuten Versuch.
+
+Alternativ zu URL oder Notiz lässt sich genau **eine Datei** hochladen: `.pdf`, `.md` oder `.txt`, höchstens 20 MiB. Der oben gewählte Vault bestimmt die Wall und damit, ob die Datei lokal (`privat`) oder über die Cloud-Wall verarbeitet wird; der Wall-Hinweis bleibt sichtbar. Gewählte Sammlungen gelten auch für den Upload. Das Gateway prüft das Format serverseitig (PDF-Signatur und lesbares PDF, UTF-8 für Markdown/Text) und legt einen Queue-Job an, dessen Status wie gewohnt angezeigt wird.
+
+Die hochgeladene Originaldatei wird nur temporär auf der Platte der gewählten Wall gehalten und nach Abschluss, Dedup-Treffer oder Fehler verworfen. Dauerhaft bleibt die kanonische Markdown-Kopie in `raw/<vault>/`. Gescannte PDFs ohne Textebene werden mit einem Fehler abgelehnt, da OCR nicht unterstützt wird. PDF-Links lassen sich weiterhin als URL erfassen, lokale Dateien weiterhin per CLI.
 
 Ohne gültigen Gateway-Token bleiben Vault-Auswahl, Capture und Chat gesperrt.
 

@@ -117,3 +117,71 @@ test('collection API helpers encode vaults and send stable IDs', async () => {
   assert.equal(calls[2][0], '/api/sources/business%20ki/source%2F1/collections');
   assert.deepEqual(JSON.parse(calls[2][1].body), { collection_ids: ['c1'] });
 });
+
+test('uploadDocument sends multipart FormData with Bearer and no explicit content type', async () => {
+  localStorage.setItem('kb_token', 'tok');
+  let captured = null;
+  globalThis.fetch = async (path, options = {}) => {
+    captured = { path, options };
+    return { status: 202, ok: true, json: async () => ({ job_id: 7, vault: 'privat', kind: 'upload' }) };
+  };
+
+  const { uploadDocument } = await import('../src/lib/api.js');
+  const file = new File([new Uint8Array([1, 2, 3])], 'note.md', { type: 'text/markdown' });
+  const result = await uploadDocument('privat', file, ['c1', 'c2']);
+
+  assert.deepEqual(result, { job_id: 7, vault: 'privat', kind: 'upload' });
+  assert.equal(captured.path, '/api/uploads');
+  assert.equal(captured.options.method, 'POST');
+  assert.equal(captured.options.headers.Authorization, 'Bearer tok');
+  assert.equal(captured.options.headers['Content-Type'], undefined, 'multipart boundary must come from the browser');
+  assert.ok(captured.options.body instanceof FormData);
+  assert.equal(captured.options.body.get('vault'), 'privat');
+  assert.equal(captured.options.body.get('file'), file);
+  assert.deepEqual(JSON.parse(captured.options.body.get('collection_ids')), ['c1', 'c2']);
+});
+
+test('api still sets JSON content type for string bodies', async () => {
+  localStorage.setItem('kb_token', 'tok');
+  let headers = null;
+  globalThis.fetch = async (_path, options = {}) => {
+    headers = options.headers;
+    return { status: 202, ok: true, json: async () => ({}) };
+  };
+
+  const { api } = await import('../src/lib/api.js');
+  await api('/api/ingest', { method: 'POST', body: JSON.stringify({ vault: 'privat', content: 'x' }) });
+  assert.equal(headers['Content-Type'], 'application/json');
+});
+
+test('uploadDocument surfaces server validation detail as ApiError', async () => {
+  localStorage.setItem('kb_token', 'tok');
+  globalThis.fetch = async () => ({
+    status: 413,
+    ok: false,
+    json: async () => ({ detail: 'Datei überschreitet 20 MiB' }),
+  });
+
+  const { uploadDocument, ApiError } = await import('../src/lib/api.js');
+  const file = new File([new Uint8Array(21 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' });
+  await assert.rejects(
+    uploadDocument('privat', file, []),
+    (e) => e instanceof ApiError && e.status === 413 && /20 MiB/.test(e.message),
+  );
+});
+
+test('validateUploadFile rejects unsupported, empty, and oversized files before transfer', async () => {
+  const { validateUploadFile, UPLOAD_MAX_BYTES } = await import('../src/lib/api.js');
+  const ok = new File([new Uint8Array([1])], 'Note.PDF');
+  assert.equal(validateUploadFile(ok), '');
+  assert.equal(validateUploadFile(new File([new Uint8Array([1])], 'a.md')), '');
+  assert.equal(validateUploadFile(new File([new Uint8Array([1])], 'a.txt')), '');
+
+  assert.match(validateUploadFile(new File([new Uint8Array([1])], 'tool.exe')), /Nicht unterstütztes Format/);
+  assert.match(validateUploadFile(new File([new Uint8Array([1])], 'noext')), /Nicht unterstütztes Format/);
+  assert.match(validateUploadFile(new File([], 'empty.md')), /leer/);
+
+  const big = new File([new Uint8Array(UPLOAD_MAX_BYTES + 1)], 'big.pdf');
+  assert.match(validateUploadFile(big), /zu groß/);
+  assert.match(validateUploadFile(big), /20 MiB/);
+});

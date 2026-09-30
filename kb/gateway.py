@@ -4,17 +4,21 @@ Läuft als eigener Prozess OHNE cognee-Import — Ingest geht direkt in die
 SQLite-Queue (WAL), Queries werden per HTTP an den Instance Service geproxyt.
 """
 
+import json
 import os
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import UploadFile
 from pydantic import BaseModel, Field, field_validator
+from python_multipart.exceptions import FormParserError
 
 from kb.classify import build_payload
 from kb.config import (
@@ -29,6 +33,7 @@ from kb.config import (
 )
 from kb.logging_setup import setup_logging
 from kb.query_proxy import QueryProxyError, proxy_query, proxy_search
+from kb.uploads import MAX_UPLOAD_BYTES, stage_upload
 from kb.queue import JobQueue
 from kb.sources import (
     CollectionConflictError,
@@ -39,6 +44,51 @@ from kb.sources import (
 
 HEALTH_TIMEOUT = 2.0
 
+MAX_MULTIPART_BYTES = 20 * 1024 * 1024 + 64 * 1024
+
+class UploadTooLargeError(Exception):
+    pass
+
+
+class UploadRequestLimitMiddleware:
+    """Begrenzt Upload-Bytes vor dem Multipart-Parser, auch ohne Content-Length."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        if scope["type"] != "http" or scope["path"] != "/api/uploads" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        headers = {key.lower(): value for key, value in scope["headers"]}
+        expected = os.environ.get("KB_API_TOKEN")
+        authorization = headers.get(b"authorization", b"").decode("latin-1")
+        provided = authorization.removeprefix("Bearer ")
+        if not expected or not secrets.compare_digest(provided, expected):
+            await send({"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": b'{"detail":"Invalid token"}'})
+            return
+        content_length = headers.get(b"content-length")
+        if content_length and (not content_length.isdigit() or int(content_length) > MAX_MULTIPART_BYTES):
+            await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": b'{"detail":"Upload exceeds 20 MiB"}'})
+            return
+        received = 0
+
+        async def bounded_receive() -> dict[str, Any]:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_MULTIPART_BYTES:
+                    raise UploadTooLargeError
+            return message
+
+        try:
+            await self.app(scope, bounded_receive, send)
+        except UploadTooLargeError:
+            await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": b'{"detail":"Upload exceeds 20 MiB"}'})
 
 def require_token(authorization: str | None = Header(default=None)) -> None:
     # Token erst beim Request lesen — Tests setzen die Env via monkeypatch.
@@ -128,6 +178,7 @@ def _collection_not_found() -> HTTPException:
 def create_app() -> FastAPI:
     setup_logging()
     app = FastAPI(title="kb-gateway")
+    app.add_middleware(UploadRequestLimitMiddleware)
     api = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
     @app.middleware("http")
@@ -139,7 +190,6 @@ def create_app() -> FastAPI:
         request.state.request_id = request_id
         # Defense-in-depth: das Bearer-Token liegt im PWA-localStorage. Ein
         # künftiges innerHTML/set:html würde ohne CSP sofort den Token
-        # exfiltrieren — CSP macht daraus einen containerten Bruch.
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         response.headers["Content-Security-Policy"] = (
@@ -179,6 +229,62 @@ def create_app() -> FastAPI:
         q = JobQueue(queue_path(v.instance))
         jid = q.enqueue(v.name, kind, payload)
         return {"job_id": jid, "vault": v.name, "kind": kind}
+
+    @api.post("/uploads", status_code=202)
+    async def upload(request: Request) -> dict[str, object]:
+        try:
+            form = await request.form(max_files=1, max_fields=3, max_part_size=8 * 1024)
+        except HTTPException as exc:
+            raise HTTPException(422, str(exc.detail)) from None
+        except FormParserError:
+            # Kaputter Multipart-Body ist ein Client-Fehler, kein 500.
+            raise HTTPException(422, "Ungültiger Multipart-Body") from None
+        files = form.getlist("file")
+        if len(files) != 1 or not isinstance(files[0], UploadFile):
+            raise HTTPException(422, "Genau eine Datei ist erforderlich")
+        if set(form.keys()) - {"vault", "file", "collection_ids"}:
+            raise HTTPException(422, "Ungültiges Upload-Feld")
+        vault_name = form.get("vault")
+        if not isinstance(vault_name, str):
+            raise HTTPException(422, "Vault fehlt")
+        v = _resolve_vault(vault_name)
+        collection_raw = form.get("collection_ids", "[]")
+        if not isinstance(collection_raw, str):
+            raise HTTPException(422, "collection_ids ist ungültig")
+        try:
+            collection_ids = json.loads(collection_raw)
+        except json.JSONDecodeError:
+            raise HTTPException(422, "collection_ids muss JSON sein") from None
+        if (
+            not isinstance(collection_ids, list)
+            or len(collection_ids) > 10
+            or any(not isinstance(item, str) for item in collection_ids)
+            or len(set(collection_ids)) != len(collection_ids)
+        ):
+            raise HTTPException(422, "collection_ids ist ungültig")
+        store = SourceStore(sources_path(v.instance))
+        try:
+            store.validate_collection_ids(v.name, collection_ids)
+        except CollectionValidationError as exc:
+            raise HTTPException(422, str(exc)) from None
+        reference, name = await stage_upload(v, files[0])
+        try:
+            q = JobQueue(queue_path(v.instance))
+            jid = q.enqueue(
+                v.name,
+                "upload",
+                {"reference": reference, "filename": name, "collection_ids": collection_ids,
+                 "request_id": request.state.request_id},
+            )
+        except BaseException:
+            from kb.uploads import resolve_staged_upload
+
+            try:
+                resolve_staged_upload(v, reference).unlink()
+            except (OSError, ValueError):
+                pass
+            raise
+        return {"job_id": jid, "vault": v.name, "kind": "upload"}
 
     @api.post("/query")
     async def query(request: Request, body: QueryBody) -> dict[str, object]:

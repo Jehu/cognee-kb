@@ -6,13 +6,46 @@ from pathlib import Path
 from typing import Any
 
 from kb import cognee_io, fetch_pdf, fetch_web, fetch_youtube, rawstore
-from kb.config import Instance, get_vault
+from kb.config import VAULTS, Instance, get_vault
 from kb.fetch_youtube import FetchedDoc
 from kb.logging_setup import setup_logging
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
+from kb.uploads import reconcile_orphans, resolve_staged_upload
 
 logger = logging.getLogger("kb.worker")
+
+
+def _fetch_upload(vault_name: str, payload: dict[str, Any]) -> FetchedDoc:
+    vault = get_vault(vault_name)
+    path = resolve_staged_upload(vault, payload.get("reference"))
+    filename = payload.get("filename")
+    if not isinstance(filename, str):
+        raise ValueError("Ungültiger Upload-Dateiname")
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        doc = fetch_pdf.from_path(path, label=filename)
+    elif suffix in {".md", ".txt"}:
+        body = path.read_text(encoding="utf-8")
+        if not body.strip():
+            raise ValueError("Datei darf nicht leer sein")
+        doc = FetchedDoc(title=Path(filename).stem or "Upload", body=body)
+    else:
+        raise ValueError("Ungültiger Upload-Dateityp")
+    return FetchedDoc(title=doc.title, body=doc.body)
+
+
+def _cleanup_upload(vault_name: str, payload: dict[str, Any]) -> None:
+    try:
+        resolve_staged_upload(get_vault(vault_name), payload.get("reference")).unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def _source_type(job: Any) -> str:
+    if job.kind != "upload":
+        return job.kind
+    return "pdf" if str(job.payload.get("reference", "")).endswith(".pdf") else "file"
 
 
 def _fetch(kind: str, payload: dict[str, Any]) -> FetchedDoc:
@@ -105,7 +138,10 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
             q.mark_done(job.id)
             return True
         # _fetch ist blockierendes I/O (HTTP, Datei) — nicht den Loop blockieren
-        doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
+        if job.kind == "upload":
+            doc = await asyncio.to_thread(_fetch_upload, job.vault, job.payload)
+        else:
+            doc = await asyncio.to_thread(_fetch, job.kind, job.payload)
         # Dedup: identischer Body im selben Vault wird nicht erneut ingestet
         # (cognee dedupt intern per Hash, unsere raw-/Source-Schicht bisher nicht
         # — sonst doppelte Quellen-Chips). mark_done, nicht failed: kein Fehler.
@@ -121,7 +157,8 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
             q.mark_done(job.id)
             return True
         record = SourceRecord.new(
-            type=job.kind,
+            # Uploads als pdf/file führen — sonst greifen Quellen-Filter und Icons nicht.
+            type=_source_type(job),
             url=doc.url,
             video_id=doc.video_id,
             locator=doc.locator,
@@ -191,6 +228,9 @@ async def process_one_async(instance: Instance, q: JobQueue, store: SourceStore)
             e,
         )
         q.mark_failed(job.id, f"{type(e).__name__}: {e}")
+    finally:
+        if job.kind == "upload":
+            _cleanup_upload(job.vault, job.payload)
     return True
 
 
@@ -213,6 +253,9 @@ def run_forever(
     setup_logging()
     cognee_io.load_instance_env(instance)
     q.recover_stale()  # genau ein Worker pro Instanz — verwaiste Jobs gefahrlos zurücksetzen
+    for vault in VAULTS.values():
+        if vault.instance == instance.name:
+            reconcile_orphans(vault, q.active_upload_references(vault.name))
     store.dispatch_reindex_events(q)
     # EIN Loop für alle Jobs — cognee cachet loop-gebundene Ressourcen
     # (siehe _answer_all in cli.py), frischer Loop pro Job riskiert

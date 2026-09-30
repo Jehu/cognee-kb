@@ -18,6 +18,22 @@ test('ingest page exposes a compact capture flow with metadata and job steps', a
   assert.match(html, /vault-hint/);
 });
 
+test('ingest page offers an exclusive file mode with format and size hints', async () => {
+  const html = await source('src/pages/index.astro');
+  assert.match(html, /data-mode="text"/);
+  assert.match(html, /data-mode="file"/);
+  assert.match(html, /type="file"/);
+  assert.match(html, /accept="\.pdf,\.md,\.txt"/);
+  assert.match(html, /20 MiB/);
+  assert.match(html, /validateUploadFile/);
+  assert.match(html, /uploadDocument/);
+  // File mode must not demand text content and vice versa.
+  assert.match(html, /content\.required = !isFile/);
+  // Job polling goes through the authenticated API helper, not bare fetch.
+  assert.doesNotMatch(html, /fetch\(`\/api\/jobs/);
+  assert.match(html, /api\(`\/api\/jobs\//);
+});
+
 test('chat page has a useful empty state with sample questions', async () => {
   const html = await source('src/pages/chat.astro');
   assert.match(html, /id="empty"/);

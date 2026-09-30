@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.28.1",
     "mcp>=1.27",
     "pypdf>=6.13.3",
+    "python-multipart>=0.0.31",
     "pyyaml>=6.0.3",
     "trafilatura>=2.1.0",
     "typer>=0.26.7",

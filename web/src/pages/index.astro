@@ -5,7 +5,7 @@ import Base from '../layouts/Base.astro';
   <div class="page-intro">
     <p class="label" style="margin:0">Quelle erfassen</p>
     <h1>Was willst du festhalten?</h1>
-    <p>Link, Notiz oder Text — die Verarbeitung läuft im Hintergrund.</p>
+    <p>Link, Notiz, Text oder Datei — die Verarbeitung läuft im Hintergrund.</p>
   </div>
 
   <form id="form">
@@ -13,8 +13,21 @@ import Base from '../layouts/Base.astro';
     <select id="vault" required></select>
     <div id="vault-hint" class="vault-hint hidden"></div>
 
-    <label for="content">Quelle oder Notiz</label>
-    <textarea id="content" placeholder="Link einfügen oder Notiz schreiben" required autofocus></textarea>
+    <div id="mode" class="filter-bar mode-switch" role="group" aria-label="Eingabeart">
+      <button type="button" class="filter-chip" data-mode="text" aria-pressed="true">Text / Link</button>
+      <button type="button" class="filter-chip" data-mode="file" aria-pressed="false">Datei</button>
+    </div>
+
+    <div id="mode-text">
+      <label for="content">Quelle oder Notiz</label>
+      <textarea id="content" placeholder="Link einfügen oder Notiz schreiben" autofocus></textarea>
+    </div>
+
+    <div id="mode-file" class="hidden">
+      <label for="file">Datei</label>
+      <input type="file" id="file" accept=".pdf,.md,.txt">
+      <p class="file-hint">Eine PDF-, Markdown- oder Textdatei, maximal 20 MiB.</p>
+    </div>
 
     <section id="capture-collections" class="collection-control" aria-labelledby="capture-collections-label">
       <h2 id="capture-collections-label" class="label">Sammlungen</h2>
@@ -34,16 +47,22 @@ import Base from '../layouts/Base.astro';
   <script>
     import { initVaultSelect } from '../lib/bootstrap.js';
     import { mountCollectionSelector } from '../lib/collections.js';
+    import { validateUploadFile } from '../lib/api.js';
 
     const form = document.getElementById('form');
     const vaultSel = document.getElementById('vault');
     const vaultHint = document.getElementById('vault-hint');
+    const modeText = document.getElementById('mode-text');
+    const modeFile = document.getElementById('mode-file');
+    const content = document.getElementById('content');
+    const fileInput = document.getElementById('file');
     const collectionSelector = mountCollectionSelector(document.getElementById('collection-selector'));
     const submit = document.getElementById('submit');
     const status = document.getElementById('status');
     const steps = document.getElementById('steps');
     let ready = false;
-    let pollAbort = false;
+    let mode = 'text';
+    let pollToken = 0;
 
     function setStatus(text, cls = '') {
       status.className = `status ${cls}`.trim();
@@ -72,6 +91,23 @@ import Base from '../layouts/Base.astro';
         : 'Cloud-Verarbeitung · OpenRouter'}`;
     }
 
+    // Modus-Wechsel: Vault-Auswahl und Sammlungen bleiben unberührt (R1).
+    function setMode(next) {
+      if (next === mode) return;
+      mode = next;
+      const isFile = mode === 'file';
+      modeText.classList.toggle('hidden', isFile);
+      modeFile.classList.toggle('hidden', !isFile);
+      for (const chip of document.querySelectorAll('#mode .filter-chip')) {
+        const active = chip.dataset.mode === mode;
+        chip.classList.toggle('active', active);
+        chip.setAttribute('aria-pressed', String(active));
+      }
+      content.required = !isFile;
+    }
+    document.querySelectorAll('#mode .filter-chip').forEach(chip =>
+      chip.addEventListener('click', () => setMode(chip.dataset.mode)));
+
     initVaultSelect(vaultSel).then(state => {
       ready = state.ok;
       submit.disabled = !ready;
@@ -83,12 +119,15 @@ import Base from '../layouts/Base.astro';
       collectionSelector.setVault(vaultSel.value);
     });
 
-    function poll(vault, id) {
-      pollAbort = true; const my = pollAbort;
+    // Authentifiziertes Polling — ohne Token wäre der Job-Endpoint 401 und
+    // Upload-Jobs kämen nie in einen sichtbaren Endzustand (KTD5).
+    async function poll(vault, id) {
+      const my = ++pollToken;
+      const { api } = await import('../lib/api.js');
       (async function tick() {
-        if (my !== pollAbort) return;
+        if (my !== pollToken) return;
         try {
-          const j = await (await fetch(`/api/jobs/${encodeURIComponent(vault)}/${id}`)).json();
+          const j = await api(`/api/jobs/${encodeURIComponent(vault)}/${id}`);
           if (j.status === 'pending') { setStep('accepted'); setTimeout(tick, 1500); }
           else if (j.status === 'running') { setStep('running'); setTimeout(tick, 1500); }
           else if (j.status === 'done') { setStep('done'); setStatus('Fertig.', 'ok'); }
@@ -101,25 +140,51 @@ import Base from '../layouts/Base.astro';
       e.preventDefault();
       if (!ready) return;
       const vault = vaultSel.value;
-      const content = document.getElementById('content').value.trim();
-      if (!content) return;
+      const collectionIds = collectionSelector.getSelected();
+
+      if (mode === 'text') {
+        const text = content.value.trim();
+        if (!text) return;
+        submit.disabled = true;
+        setStep('accepted');
+        setStatus('Sende…');
+        const { api } = await import('../lib/api.js');
+        try {
+          const r = await api('/api/ingest', {
+            method: 'POST',
+            body: JSON.stringify({ vault, content: text, collection_ids: collectionIds }),
+          });
+          setStep('running');
+          setStatus(`Job #${r.job_id} angenommen (${r.kind}).`);
+          content.value = '';
+          poll(vault, r.job_id);
+        } catch (err) {
+          setStatus(err.message, 'err');
+          steps.classList.add('hidden');
+        } finally {
+          submit.disabled = false;
+        }
+        return;
+      }
+
+      // Datei-Modus: clientseitige Prüfung ist Komfort, der Server bleibt autoritativ.
+      const file = fileInput.files?.[0];
+      if (!file) { setStatus('Bitte zuerst eine Datei auswählen.', 'err'); return; }
+      const problem = validateUploadFile(file);
+      if (problem) { setStatus(problem, 'err'); return; }
 
       submit.disabled = true;
       setStep('accepted');
-      setStatus('Sende…');
-
-      const { api, getToken } = await import('../lib/api.js');
+      setStatus(`„${file.name}“ wird hochgeladen…`);
+      const { uploadDocument } = await import('../lib/api.js');
       try {
-        const r = await api('/api/ingest', {
-          method: 'POST',
-          body: JSON.stringify({ vault, content, collection_ids: collectionSelector.getSelected() }),
-        });
+        const r = await uploadDocument(vault, file, collectionIds);
         setStep('running');
         setStatus(`Job #${r.job_id} angenommen (${r.kind}).`);
-        document.getElementById('content').value = '';
+        fileInput.value = ''; // erst nach 202 zurücksetzen — Fehlerfall erlaubt Retry.
         poll(vault, r.job_id);
-      } catch (e) {
-        setStatus(e.message, 'err');
+      } catch (err) {
+        setStatus(err.message, 'err');
         steps.classList.add('hidden');
       } finally {
         submit.disabled = false;

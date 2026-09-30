@@ -13,11 +13,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 
 from kb import cognee_io, guard, query_service, worker
-from kb.config import get_instance
+from kb.config import VAULTS, get_instance
 from kb.logging_setup import setup_logging
 from kb.query_models import QueryRequest
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
+from kb.uploads import reconcile_orphans
 
 logger = logging.getLogger("kb.instance")
 
@@ -64,6 +65,9 @@ def create_app(instance_name: str) -> FastAPI:
         q = JobQueue(inst.var_dir / "queue.db")
         store = SourceStore(inst.var_dir / "sources.db")
         q.recover_stale()  # genau ein Worker pro Instanz — gefahrlos
+        for vault in VAULTS.values():
+            if vault.instance == inst.name:
+                reconcile_orphans(vault, q.active_upload_references(vault.name))
         store.dispatch_reindex_events(q)  # Outbox-Crash-Lücken vor Workerstart schließen
         # Selber Event-Loop wie die Request-Handler — kein Thread, kein neuer Loop.
         task = asyncio.create_task(worker.run_forever_async(inst, q, store))

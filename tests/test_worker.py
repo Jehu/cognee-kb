@@ -1,12 +1,17 @@
 import asyncio
+import hashlib
 import logging
+import uuid
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
 from kb.config import Vault
+from kb.fetch_youtube import FetchedDoc
 from kb.queue import JobQueue
 from kb.sources import SourceRecord, SourceStore
+from kb.uploads import reconcile_orphans, upload_dir
 from kb.worker import process_one, process_one_async, run_forever_async
 
 
@@ -411,3 +416,211 @@ async def test_failed_reindex_records_primary_and_rollback_failure(tmp_path):
     assert store.indexed_collection_ids(source.id) == [old.id]
     assert store.cognee_ids(source.id) == ("ds-old", "data-old")
     assert q.status(jid) == "failed"
+
+
+# --- Upload-Jobs: Konsum, Cleanup, Dedup, Fehler, Orphan-Reinigung ---
+
+
+@pytest.fixture
+def upload_vault(tmp_path, isolated_var) -> Vault:
+    # Staging landet via isolated_var unter <tmp>/var/local/uploads/privat.
+    return Vault(name="privat", instance="local", dataset="privat", raw_dir=tmp_path / "raw")
+
+
+def stage_tmp_upload(vault: Vault, body: bytes, suffix: str = ".txt") -> str:
+    """Legt eine Datei so ab, wie stage_upload sie hinterlassen würde."""
+    root = upload_dir(vault)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    reference = f"{uuid.uuid4().hex}{suffix}"
+    (root / reference).write_bytes(body)
+    return reference
+
+
+def _source_count(store: SourceStore) -> int:
+    return store.conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
+
+
+@pytest.mark.asyncio
+async def test_upload_job_consumes_txt_and_cleans_staged_file(tmp_path, upload_vault):
+    vault = upload_vault
+    reference = stage_tmp_upload(vault, b"Upload-Inhalt")
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "upload", {"reference": reference, "filename": "notiz.txt"})
+    ingest_mock = AsyncMock(return_value=("ds-1", "data-1"))
+
+    with (
+        patch("kb.worker.get_vault", return_value=vault),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
+        assert await process_one_async(None, q=q, store=store)
+
+    assert q.status(jid) == "done"
+    # Staged-Datei nach der Verarbeitung entfernt.
+    assert list(upload_dir(vault).iterdir()) == []
+    # Quelle angelegt, Titel vom Dateinamen, Body im Rawstore.
+    (record,) = store.conn.execute("SELECT id, title, type FROM sources").fetchall()
+    assert record[1] == "notiz"
+    assert record[2] == "file"
+    raw_file = Path(next(iter((vault.raw_dir).glob("*.md"))))
+    assert "Upload-Inhalt" in raw_file.read_text()
+    ingest_mock.assert_awaited_once_with(
+        None, ANY, "privat", node_sets=[record[0]]
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_job_consumes_pdf_via_fetch_pdf(tmp_path, upload_vault):
+    vault = upload_vault
+    reference = stage_tmp_upload(vault, b"%PDF-fake", suffix=".pdf")
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "upload", {"reference": reference, "filename": "bericht.pdf"})
+    ingest_mock = AsyncMock(return_value=("ds-2", "data-2"))
+
+    with (
+        patch("kb.worker.get_vault", return_value=vault),
+        patch("kb.fetch_pdf.from_path", return_value=FetchedDoc(title="Bericht", body="PDF-Text")),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
+        assert await process_one_async(None, q=q, store=store)
+
+    assert q.status(jid) == "done"
+    assert list(upload_dir(vault).iterdir()) == []
+    path_arg = ingest_mock.await_args.args[1]
+    assert Path(path_arg).read_text().count("PDF-Text") == 1
+    assert store.conn.execute("SELECT type FROM sources").fetchone()[0] == "pdf"
+
+
+@pytest.mark.asyncio
+async def test_upload_job_dedup_marks_done_without_ingest(tmp_path, upload_vault):
+    vault = upload_vault
+    reference = stage_tmp_upload(vault, b"doppelter Body")
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    raw = tmp_path / "alt.md"
+    raw.write_text("alt")
+    store.insert(
+        SourceRecord.new(
+            type="snippet",
+            url=None,
+            video_id=None,
+            locator=None,
+            vault="privat",
+            raw_md_path=str(raw),
+            content_hash=hashlib.sha256("doppelter Body".encode()).hexdigest(),
+        )
+    )
+    jid = q.enqueue("privat", "upload", {"reference": reference, "filename": "dup.txt"})
+    ingest_mock = AsyncMock()
+
+    with (
+        patch("kb.worker.get_vault", return_value=vault),
+        patch("kb.cognee_io.ingest", ingest_mock),
+    ):
+        assert await process_one_async(None, q=q, store=store)
+
+    # Dedup ist kein Fehler: done, kein zweiter Ingest, keine zweite Quelle.
+    assert q.status(jid) == "done"
+    ingest_mock.assert_not_awaited()
+    assert _source_count(store) == 1
+    assert list(upload_dir(vault).iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_job_failure_marks_failed_and_cleans_staged_file(tmp_path, upload_vault):
+    vault = upload_vault
+    # Gültiger Referenz-Name, aber leerer Inhalt → Fetch schlägt fehl.
+    reference = stage_tmp_upload(vault, b"")
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "upload", {"reference": reference, "filename": "leer.txt"})
+
+    with patch("kb.worker.get_vault", return_value=vault):
+        assert await process_one_async(None, q=q, store=store)
+
+    assert q.status(jid) == "failed"
+    assert "leer" in q.info(jid)["error"]
+    # Cleanup läuft auch im Fehlerfall (finally-Zweig).
+    assert list(upload_dir(vault).iterdir()) == []
+    assert _source_count(store) == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_job_missing_staged_file_fails(tmp_path, upload_vault):
+    vault = upload_vault
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue(
+        "privat", "upload", {"reference": f"{uuid.uuid4().hex}.txt", "filename": "weg.txt"}
+    )
+
+    with patch("kb.worker.get_vault", return_value=vault):
+        assert await process_one_async(None, q=q, store=store)
+
+    assert q.status(jid) == "failed"
+    assert "Staged Upload nicht gefunden" in q.info(jid)["error"]
+
+
+@pytest.mark.asyncio
+async def test_upload_job_invalid_filename_payload_fails(tmp_path, upload_vault):
+    vault = upload_vault
+    reference = stage_tmp_upload(vault, b"x")
+    q = JobQueue(tmp_path / "q.db")
+    store = SourceStore(tmp_path / "s.db")
+    jid = q.enqueue("privat", "upload", {"reference": reference, "filename": 42})
+
+    with patch("kb.worker.get_vault", return_value=vault):
+        assert await process_one_async(None, q=q, store=store)
+
+    assert q.status(jid) == "failed"
+    assert "Ungültiger Upload-Dateiname" in q.info(jid)["error"]
+    assert list(upload_dir(vault).iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_reconciliation_keeps_active_and_removes_stale(tmp_path, upload_vault):
+    """Spiegelt den Startup-Pfad aus run_forever: recover + reconcile_orphans."""
+    import os
+    import time as time_mod
+
+    vault = upload_vault
+    q = JobQueue(tmp_path / "q.db")
+    active_ref = stage_tmp_upload(vault, b"aktiv")
+    q.enqueue("privat", "upload", {"reference": active_ref, "filename": "a.txt"})
+    done_ref = stage_tmp_upload(vault, b"fertig")  # Job done → Referenz nicht mehr aktiv
+    done_jid = q.enqueue("privat", "upload", {"reference": done_ref, "filename": "b.txt"})
+    q.mark_done(done_jid)
+    stale_orphan = Path(upload_dir(vault)) / f"{uuid.uuid4().hex}.txt"
+    stale_orphan.write_bytes(b"verwaist")
+    done_path = Path(upload_dir(vault)) / done_ref
+    old = time_mod.time() - 400  # auch die done-Referenz muss die Grace überschreiten
+    os.utime(stale_orphan, (old, old))
+    os.utime(done_path, (old, old))
+    fresh_orphan = Path(upload_dir(vault)) / f"{uuid.uuid4().hex}.txt"
+    fresh_orphan.write_bytes(b"frisch")
+
+    removed = reconcile_orphans(vault, q.active_upload_references("privat"))
+
+    assert removed == 2  # verwaiste Datei + Referenz des erledigten Jobs
+    assert (Path(upload_dir(vault)) / active_ref).exists()
+    assert not stale_orphan.exists()
+    assert not (Path(upload_dir(vault)) / done_ref).exists()
+    assert fresh_orphan.exists()
+
+
+def test_active_upload_references_only_counts_pending_and_running(tmp_path, upload_vault):
+    vault = upload_vault
+    q = JobQueue(tmp_path / "q.db")
+    pending_ref = f"{uuid.uuid4().hex}.txt"
+    done_ref = f"{uuid.uuid4().hex}.txt"
+    failed_ref = f"{uuid.uuid4().hex}.txt"
+    q.enqueue("privat", "upload", {"reference": pending_ref, "filename": "p.txt"})
+    done = q.enqueue("privat", "upload", {"reference": done_ref, "filename": "d.txt"})
+    failed = q.enqueue("privat", "upload", {"reference": failed_ref, "filename": "f.txt"})
+    q.mark_done(done)
+    q.mark_failed(failed, "x")
+
+    assert q.active_upload_references("privat") == {pending_ref}
+    # Nur der eigene Vault zählt.
+    assert q.active_upload_references("anderer") == set()

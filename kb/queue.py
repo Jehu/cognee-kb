@@ -118,6 +118,19 @@ class JobQueue:
         row = self.conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
         return row[0] if row else None
 
+    def active_upload_references(self, vault: str) -> set[str]:
+        """Referenzen laufender Upload-Jobs für die vorsichtige Orphan-Reinigung."""
+        rows = self.conn.execute(
+            "SELECT payload FROM jobs WHERE vault=? AND kind='upload' AND status IN ('pending','running')",
+            (vault,),
+        )
+        return {
+            reference
+            for (payload_raw,) in rows
+            if isinstance((payload := json.loads(payload_raw)).get("reference"), str)
+            for reference in [payload["reference"]]
+        }
+
     def counts(self) -> dict[str, int]:
         """Job-Anzahl je Status; nicht vorkommende Stati = 0 (für /health)."""
         result = {s: 0 for s in ("pending", "running", "done", "failed")}

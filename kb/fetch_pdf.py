@@ -51,8 +51,10 @@ def fetch(url: str) -> FetchedDoc:
     raise RuntimeError(f"Zu viele Redirects: {url}")
 
 
-def from_path(path: str) -> FetchedDoc:
-    return _doc(PdfReader(path), path, None)
+def from_path(path: str | Path, label: str | None = None) -> FetchedDoc:
+    # label: Anzeigename für Titel-Fallback und Fehlermeldung — bei Browser-Uploads
+    # darf der interne Staging-Pfad nicht im Job-Fehler bzw. Quellentitel landen.
+    return _doc(PdfReader(path), label or str(path), None)
 
 
 __all__ = ["UnsafeUrlError", "fetch", "from_path"]

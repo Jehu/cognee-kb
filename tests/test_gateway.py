@@ -1,6 +1,11 @@
+import io
+import json
+import re
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
 
 from kb import gateway
 from kb.query_proxy import QueryProxyError
@@ -611,3 +616,248 @@ def test_ingest_rejects_invalid_collection_before_enqueue(client, tmp_path, monk
     )
     assert response.status_code == 422
     assert JobQueue(tmp_path / "cloud.db").counts()["pending"] == 0
+
+
+# --- Upload-Endpoint (/api/uploads) ---
+
+
+@pytest.fixture
+def upload_client(tmp_path, monkeypatch, isolated_var):
+    """Client mit tmp-isoliertem Vault-Layout: Staging landet in tmp_path/var/... ."""
+    monkeypatch.setenv("KB_API_TOKEN", TOKEN)
+    monkeypatch.setattr("kb.gateway.queue_path", lambda inst: tmp_path / f"{inst}.db")
+    monkeypatch.setattr("kb.gateway.sources_path", lambda inst: tmp_path / f"{inst}_sources.db")
+    from kb.config import Vault
+    from kb.config import get_vault as _real_get_vault
+
+    def _fake_get_vault(name):
+        real = _real_get_vault(name)
+        return Vault(
+            name=real.name,
+            instance=real.instance,
+            dataset=real.dataset,
+            raw_dir=tmp_path / "raw" / name,
+        )
+
+    monkeypatch.setattr("kb.gateway.get_vault", _fake_get_vault)
+    return TestClient(gateway.create_app())
+
+
+def _staged_files(tmp_path, vault="privat", instance="local"):
+    root = tmp_path / "var" / instance / "uploads" / vault
+    return sorted(p.name for p in root.iterdir()) if root.is_dir() else []
+
+
+def _upload_payload(q: JobQueue, job_id: int) -> dict:
+    (raw,) = q.conn.execute("SELECT payload FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return json.loads(raw)
+
+
+def test_upload_txt_enqueues_job_and_stages_inside_wall(upload_client, tmp_path):
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "privat"},
+        files={"file": ("../../notiz.txt", b"Hello Upload", "text/plain")},
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert body["vault"] == "privat"
+    assert body["kind"] == "upload"
+
+    q = JobQueue(tmp_path / "local.db")
+    info = q.info(body["job_id"])
+    assert info["kind"] == "upload"
+    assert info["status"] == "pending"
+    payload = _upload_payload(q, body["job_id"])
+    # Referenz ist servergeneriert (32 Hex + Suffix), Filename sanitisiert.
+    assert re.fullmatch(r"[0-9a-f]{32}\.txt", payload["reference"])
+    assert payload["filename"] == "notiz.txt"
+    assert payload["collection_ids"] == []
+    # Gestagt in der Wall der Instanz, Inhalt unverändert.
+    staged = tmp_path / "var" / "local" / "uploads" / "privat" / payload["reference"]
+    assert staged.read_bytes() == b"Hello Upload"
+    assert _staged_files(tmp_path) == [payload["reference"]]
+
+
+def test_upload_pdf_enqueues_pdf_reference(upload_client, tmp_path):
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    pdf = buffer.getvalue()
+
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "privat"},
+        files={"file": ("bericht.pdf", pdf, "application/pdf")},
+    )
+    assert r.status_code == 202
+    payload = _upload_payload(JobQueue(tmp_path / "local.db"), r.json()["job_id"])
+    assert payload["reference"].endswith(".pdf")
+    staged = tmp_path / "var" / "local" / "uploads" / "privat" / payload["reference"]
+    assert staged.read_bytes() == pdf
+
+
+def test_upload_stages_in_vaults_own_wall(upload_client, tmp_path):
+    # business-mwe gehört zur cloud-Instanz: Staging und Queue bleiben dort.
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "business-mwe"},
+        files={"file": ("doc.txt", b"cross wall", "text/plain")},
+    )
+    assert r.status_code == 202
+    payload = _upload_payload(JobQueue(tmp_path / "cloud.db"), r.json()["job_id"])
+    staged = tmp_path / "var" / "cloud" / "uploads" / "business-mwe" / payload["reference"]
+    assert staged.read_bytes() == b"cross wall"
+    # Kein Übergriff in die local-Wall.
+    assert _staged_files(tmp_path) == []
+
+
+def test_upload_requires_token(upload_client, tmp_path):
+    files = {"file": ("n.txt", b"x", "text/plain")}
+    assert upload_client.post("/api/uploads", data={"vault": "privat"}, files=files).status_code == 401
+    wrong = {"Authorization": "Bearer falsch"}
+    assert (
+        upload_client.post("/api/uploads", headers=wrong, data={"vault": "privat"}, files=files).status_code
+        == 401
+    )
+    assert _staged_files(tmp_path) == []
+
+
+def test_upload_unknown_vault_404(upload_client, tmp_path):
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "geheim"},
+        files={"file": ("n.txt", b"x", "text/plain")},
+    )
+    assert r.status_code == 404
+    assert _staged_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("data", "filename", "detail"),
+    [
+        (None, "n.txt", "Genau eine Datei ist erforderlich"),  # keine Datei
+        (b"payload", "tool.exe", "Erlaubt sind PDF-, Markdown- und Textdateien"),
+        (b"", "leer.txt", "Datei darf nicht leer sein"),
+        (b"\xff\xfe\x00", "broken.txt", "Textdatei muss UTF-8-kodiert sein"),
+        (b"%PDF-nope", "fake.pdf", "Datei ist kein lesbares PDF"),
+    ],
+)
+def test_upload_invalid_file_422_without_staging(upload_client, tmp_path, data, filename, detail):
+    kwargs = (
+        {"files": {"file": (filename, data, "application/octet-stream")}}
+        if data is not None
+        else {}
+    )
+    r = upload_client.post("/api/uploads", headers=AUTH, data={"vault": "privat"}, **kwargs)
+    assert r.status_code == 422
+    assert r.json()["detail"] == detail
+    assert _staged_files(tmp_path) == []
+
+
+def test_upload_missing_vault_field_422(upload_client, tmp_path):
+    r = upload_client.post(
+        "/api/uploads", headers=AUTH, files={"file": ("n.txt", b"x", "text/plain")}
+    )
+    assert r.status_code == 422
+    assert _staged_files(tmp_path) == []
+
+
+def test_upload_extra_form_field_422(upload_client, tmp_path):
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "privat", "node_set": "boese"},
+        files={"file": ("n.txt", b"x", "text/plain")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Ungültiges Upload-Feld"
+    assert _staged_files(tmp_path) == []
+
+
+@pytest.mark.parametrize("collection_ids", ["kein json", '"kein-liste"', '["a","a"]', '["x"]'])
+def test_upload_invalid_collection_ids_422_without_staging(
+    upload_client, tmp_path, collection_ids
+):
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "privat", "collection_ids": collection_ids},
+        files={"file": ("n.txt", b"x", "text/plain")},
+    )
+    assert r.status_code == 422
+    assert _staged_files(tmp_path) == []
+    assert JobQueue(tmp_path / "local.db").counts()["pending"] == 0
+
+
+def test_upload_413_oversized_content_length_rejected_before_parsing(
+    upload_client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(gateway, "MAX_MULTIPART_BYTES", 1024)
+    r = upload_client.post(
+        "/api/uploads",
+        headers=AUTH,
+        data={"vault": "privat"},
+        files={"file": ("big.txt", b"x" * 2048, "text/plain")},
+    )
+    assert r.status_code == 413
+    assert _staged_files(tmp_path) == []
+    assert JobQueue(tmp_path / "local.db").counts()["pending"] == 0
+
+
+def test_upload_413_chunked_body_without_content_length(upload_client, tmp_path):
+    # Streaming-Body über dem Limit OHNE Content-Length: bounded_receive muss
+    # abbrechen, bevor der Multipart-Parser 20+ MiB verarbeitet.
+    limit = gateway.MAX_MULTIPART_BYTES
+    boundary = "----kbtest"
+    head = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="vault"\r\n\r\nprivat\r\n'
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="big.txt"\r\n'
+        "Content-Type: text/plain\r\n\r\n"
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+
+    def stream():
+        yield head
+        chunk = b"x" * 65536
+        remaining = limit + 65536
+        while remaining > 0:
+            yield chunk[: min(len(chunk), remaining)]
+            remaining -= len(chunk)
+        yield tail
+
+    r = upload_client.post(
+        "/api/uploads",
+        headers={**AUTH, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        content=stream(),
+    )
+    assert r.status_code == 413
+    assert _staged_files(tmp_path) == []
+
+
+def test_upload_enqueue_failure_removes_staged_file(upload_client, tmp_path, monkeypatch):
+    class _Boom:
+        def __init__(self, path):
+            raise OSError("queue schreibgeschützt")
+
+    # 500 sichtbar machen, statt die OSError durch den TestClient zu werfen.
+    client = TestClient(upload_client.app, raise_server_exceptions=False)
+    monkeypatch.setattr(gateway, "JobQueue", _Boom)
+    try:
+        r = client.post(
+            "/api/uploads",
+            headers=AUTH,
+            data={"vault": "privat"},
+            files={"file": ("n.txt", b"x", "text/plain")},
+        )
+    finally:
+        monkeypatch.undo()
+    assert r.status_code == 500
+    assert _staged_files(tmp_path) == []  # gestagte Datei wurde wieder entfernt

@@ -32,7 +32,9 @@ export async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  // FormData: Content-Type weglassen — der Browser setzt die Multipart-Boundary.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  if (options.body && !isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
 
   let res;
   try {
@@ -99,7 +101,10 @@ export async function openSourceRaw(vault, sourceId) {
   if (res.status === 401) { alert('Nicht autorisiert — Token in Einstellungen prüfen.'); return; }
   if (res.status === 404) { alert('Quelle nicht gefunden.'); return; }
   if (!res.ok) { alert(`Fehler ${res.status} beim Laden der Quelle.`); return; }
-  openBlobInNewTab(await res.blob());
+  // Als text/plain neu typisieren: text/markdown lädt Safari herunter statt es
+  // anzuzeigen; charset explizit, sonst zerlegt der Blob-Tab Umlaute.
+  const body = await res.blob();
+  openBlobInNewTab(new Blob([body], { type: 'text/plain;charset=utf-8' }));
 }
 
 // Öffnet einen Blob in einem neuen Tab und gibt die Object-URL nach kurzem
@@ -200,4 +205,38 @@ export async function loadHealth() {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   return res.ok ? res.json() : { gateway: 'down', instances: {} };
+}
+
+// Upload-Limits für den Datei-Modus — Server bleibt autoritativ, das hier ist
+// nur eine frühe, freundliche Ablehnung vor dem Transfer.
+export const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+export const UPLOAD_ACCEPT = ['pdf', 'md', 'txt'];
+
+export function uploadFileExtension(name) {
+  const match = /\.([a-z0-9]+)$/i.exec(name || '');
+  return match ? match[1].toLowerCase() : '';
+}
+
+// Vorab-Prüfung: genau eine unterstützte, nicht-leere, maximal 20 MiB große Datei.
+export function validateUploadFile(file) {
+  const ext = uploadFileExtension(file?.name);
+  if (!ext || !UPLOAD_ACCEPT.includes(ext)) {
+    return `Nicht unterstütztes Format „.${ext || 'ohne'}“ — bitte PDF, Markdown (.md) oder Text (.txt) wählen.`;
+  }
+  if (file.size === 0) return 'Die Datei ist leer.';
+  if (file.size > UPLOAD_MAX_BYTES) {
+    return `Datei ist zu groß (${(file.size / 1024 / 1024).toFixed(1)} MiB) — maximal 20 MiB.`;
+  }
+  return '';
+}
+
+// Multipart-Upload: genau eine Datei, collection_ids als JSON-String-Feld
+// (Vertrag mit POST /api/uploads). api() setzt den Bearer und lässt den
+// Multipart-Content-Type vom Browser generieren.
+export function uploadDocument(vault, file, collectionIds) {
+  const body = new FormData();
+  body.append('vault', vault);
+  body.append('file', file);
+  body.append('collection_ids', JSON.stringify(collectionIds || []));
+  return api('/api/uploads', { method: 'POST', body });
 }
