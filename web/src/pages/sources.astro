@@ -30,7 +30,7 @@ import Base from '../layouts/Base.astro';
   <script>
     import { initVaultSelect } from '../lib/bootstrap.js';
     import { filterSources, mountCollectionSelector } from '../lib/collections.js';
-    import { loadSourceCollections, reassignSourceCollections } from '../lib/api.js';
+    import { loadSourceCollections, openSourceRaw, reassignSourceCollections } from '../lib/api.js';
 
     const vaultSel = document.getElementById('vault');
     const vaultHint = document.getElementById('vault-hint');
@@ -101,8 +101,14 @@ import Base from '../layouts/Base.astro';
         li.dataset.sourceId = s.source_id;
         const a = document.createElement('a');
         const isExternal = s.url && /^https?:/.test(s.url);
-        a.href = isExternal ? s.url : `/api/source/${encodeURIComponent(vaultSel.value)}/${encodeURIComponent(s.source_id)}/raw`;
-        if (isExternal) { a.target = '_blank'; a.rel = 'noopener'; }
+        if (isExternal) {
+          a.href = s.url; a.target = '_blank'; a.rel = 'noopener';
+        } else {
+          // Rohdatei braucht den Bearer-Header — normale Navigation schickt ihn nicht.
+          const vault = vaultSel.value;
+          a.href = '#';
+          a.addEventListener('click', (e) => { e.preventDefault(); openSourceRaw(vault, s.source_id); });
+        }
         const title = document.createElement('div'); title.className = 'src-title';
         title.textContent = `${TYPE_ICON[s.type] || '📄'} ${s.title || s.type || 'Ohne Titel'}`;
         const meta = document.createElement('div'); meta.className = 'src-meta';
